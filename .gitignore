@@ -1,0 +1,13 @@
+/target
+
+.env
+.env.*
+!.env.example
+
+*.md
+!README.md
+
+*.todo
+
+**/*.rs.bk
+.DS_Store
