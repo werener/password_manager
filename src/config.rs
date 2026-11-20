@@ -1,22 +1,14 @@
 use std::env;
 use std::net::SocketAddr;
 
+use crate::error::ConfigError;
+
 /// Runtime configuration loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub database_url: String,
     pub redis_url: String,
-}
-
-/// Errors returned when loading [`Config`].
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("missing environment variable: {0}")]
-    Missing(&'static str),
-
-    #[error("invalid environment variable {name}: {message}")]
-    Invalid { name: &'static str, message: String },
 }
 
 impl Config {
