@@ -1,6 +1,15 @@
+[workspace]
+members = [".", "migration"]
+resolver = "2"
+
 [package]
 name = "password_manager"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+serde = { version = "1", features = ["derive"] }
+
