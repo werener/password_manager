@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use migration::{Migrator, MigratorTrait};
 use password_manager::{config::Config, router::build_router, state::AppState};
+use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -35,9 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Migrator::up(&db, None).await?;
     tracing::info!("database migrations applied");
 
+    let redis_client = redis::Client::open(config.redis_url.as_str())?;
+    let redis = ConnectionManager::new(redis_client).await?;
+    tracing::info!("redis connection established");
+
     let bind_addr = config.bind_addr;
     let state = AppState {
         db: db.clone(),
+        redis,
         config,
     };
     let app = build_router(state);
