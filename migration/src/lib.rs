@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20261121_000001_init;
 
+/// Database migrator.
 pub struct Migrator;
 
 #[async_trait::async_trait]

@@ -157,7 +157,7 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Idempotency scoped per user: same key for same user conflicts (409 in demo flow).
+        // Unique per (user_id, idempotency_key).
         manager
             .create_index(
                 Index::create()

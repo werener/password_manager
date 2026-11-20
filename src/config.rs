@@ -1,6 +1,7 @@
 use std::env;
 use std::net::SocketAddr;
 
+/// Runtime configuration loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct Config {
     pub bind_addr: SocketAddr,
@@ -8,6 +9,7 @@ pub struct Config {
     pub redis_url: String,
 }
 
+/// Errors returned when loading [`Config`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("missing environment variable: {0}")]
@@ -18,6 +20,7 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// Loads configuration from environment variables.
     pub fn from_env() -> Result<Self, ConfigError> {
         let bind_addr_raw = require_env("BIND_ADDR")?;
         let bind_addr = bind_addr_raw.parse().map_err(|e| ConfigError::Invalid {
