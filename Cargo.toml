@@ -8,7 +8,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+migration = { path = "migration" }
 sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 serde = { version = "1", features = ["derive"] }
