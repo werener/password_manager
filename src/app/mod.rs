@@ -1,10 +1,18 @@
+pub mod dto;
+pub mod extractors;
+pub mod routers;
+pub mod state;
+pub mod validation;
+
 use std::time::Duration;
 
 use migration::{Migrator, MigratorTrait};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
-use crate::{config::Config, error::AppError, router, state::AppState};
+use crate::{config::Config, error::AppError};
+
+pub use state::AppState;
 
 /// Connects to Postgres using application config.
 pub async fn connect_db(config: &Config) -> Result<DatabaseConnection, AppError> {
@@ -33,5 +41,5 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
 
 /// Builds the Axum router for the given application state.
 pub fn build_router(state: AppState) -> axum::Router {
-    router::build_router(state)
+    routers::build_router(state)
 }

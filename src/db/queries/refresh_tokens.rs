@@ -16,7 +16,7 @@ pub struct NewRefreshToken {
     pub created_at: DateTime<FixedOffset>,
 }
 
-pub async fn insert(
+pub async fn create(
     db: &DatabaseConnection,
     input: NewRefreshToken,
 ) -> AppResult<refresh_token::Model> {

@@ -1,10 +1,9 @@
 pub mod auth;
 pub mod credentials;
-mod validation;
 
 use axum::{Router, routing::get};
 
-use crate::state::AppState;
+use crate::app::state::AppState;
 
 async fn health() -> &'static str {
     "ok"

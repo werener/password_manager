@@ -1,3 +1,6 @@
+pub mod auth;
+pub mod credentials;
+
 use serde::{Deserialize, Deserializer};
 
 use crate::error::{AppError, AppResult};

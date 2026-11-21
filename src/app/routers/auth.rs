@@ -8,19 +8,24 @@ use axum::{
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use redis::AsyncCommands;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    app::{
+        dto::auth::{
+            AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
+            RefreshRequest, RegisterRequest, RegisterResponse,
+        },
+        state::AppState,
+        validation::auth::{LoginInput, LogoutInput, PreloginInput, RefreshInput, RegisterInput},
+    },
     crypto::{
-        create_access_token, decode_base64, encode_base64, generate_refresh_token,
-        hash_auth_verifier, hash_refresh_token, normalize_email, validate_email,
-        verify_auth_verifier,
+        create_access_token, encode_base64, generate_refresh_token, hash_auth_verifier,
+        hash_refresh_token, verify_auth_verifier,
     },
     db::queries::{refresh_tokens, users},
     error::{AppError, AppResult},
-    state::AppState,
 };
 
 pub fn router() -> Router<AppState> {
@@ -32,79 +37,20 @@ pub fn router() -> Router<AppState> {
         .route("/logout", post(logout))
 }
 
-#[derive(Debug, Deserialize)]
-pub struct RegisterRequest {
-    pub email: String,
-    /// Client-derived authentication verifier; raw master password is never sent.
-    pub auth_verifier: String,
-    /// Base64-encoded KDF salt used by client to derive keys.
-    pub kdf_salt: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PreloginRequest {
-    pub email: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LoginRequest {
-    pub email: String,
-    /// Client-derived authentication verifier; raw master password is never sent.
-    pub auth_verifier: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RefreshRequest {
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LogoutRequest {
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct AuthTokensResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub token_type: &'static str,
-    pub access_expires_in_secs: u64,
-    pub refresh_expires_in_secs: u64,
-    /// Base64-encoded KDF salt for client-side key derivation.
-    pub kdf_salt: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RegisterResponse {
-    pub user_id: Uuid,
-    pub email: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PreloginResponse {
-    pub kdf_salt: String,
-}
-
 async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> AppResult<(StatusCode, Json<RegisterResponse>)> {
-    let email_normalized = normalize_email(&payload.email);
-    validate_email(&email_normalized)?;
+    let input = RegisterInput::try_from(payload)?;
 
-    let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
-    let kdf_salt = decode_base64("kdf_salt", &payload.kdf_salt)?;
-    super::validation::validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
-    super::validation::validate_len("kdf_salt", &kdf_salt, 16, 64)?;
-
-    if users::find_by_email_normalized(&state.db, &email_normalized)
+    if users::find_by_email_normalized(&state.db, &input.email_normalized)
         .await?
         .is_some()
     {
         return Err(AppError::Conflict("email already registered".to_string()));
     }
 
-    let password_hash = hash_auth_verifier(&verifier_bytes)?;
+    let password_hash = hash_auth_verifier(&input.verifier_bytes)?;
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
 
@@ -112,10 +58,10 @@ async fn register(
         &state.db,
         users::NewUser {
             id,
-            email: payload.email.trim().to_string(),
-            email_normalized,
+            email: input.email.clone(),
+            email_normalized: input.email_normalized,
             password_hash,
-            kdf_salt,
+            kdf_salt: input.kdf_salt,
             now,
         },
     )
@@ -125,7 +71,7 @@ async fn register(
         StatusCode::CREATED,
         Json(RegisterResponse {
             user_id: id,
-            email: payload.email.trim().to_string(),
+            email: input.email,
         }),
     ))
 }
@@ -134,14 +80,13 @@ async fn prelogin(
     State(state): State<AppState>,
     Json(payload): Json<PreloginRequest>,
 ) -> AppResult<Json<PreloginResponse>> {
-    let email_normalized = normalize_email(&payload.email);
-    validate_email(&email_normalized)?;
+    let input = PreloginInput::try_from(payload)?;
 
-    let user = users::find_by_email_normalized(&state.db, &email_normalized).await?;
+    let user = users::find_by_email_normalized(&state.db, &input.email_normalized).await?;
 
     let kdf_salt = match user {
         Some(u) => u.kdf_salt,
-        None => fake_kdf_salt(&state.config.jwt_secret, &email_normalized),
+        None => fake_kdf_salt(&state.config.jwt_secret, &input.email_normalized),
     };
 
     Ok(Json(PreloginResponse {
@@ -154,23 +99,20 @@ async fn login(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
-    let email_normalized = normalize_email(&payload.email);
-    validate_email(&email_normalized)?;
-    if payload.auth_verifier.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "auth_verifier is required".to_string(),
-        ));
-    }
+    let input = LoginInput::try_from(payload)?;
 
-    enforce_login_rate_limit(&state, addr.ip().to_string().as_str(), &email_normalized).await?;
+    enforce_login_rate_limit(
+        &state,
+        addr.ip().to_string().as_str(),
+        &input.email_normalized,
+    )
+    .await?;
 
-    let user = users::find_by_email_normalized(&state.db, &email_normalized)
+    let user = users::find_by_email_normalized(&state.db, &input.email_normalized)
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
-    super::validation::validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
-    let ok = verify_auth_verifier(&verifier_bytes, &user.password_hash)?;
+    let ok = verify_auth_verifier(&input.verifier_bytes, &user.password_hash)?;
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -182,14 +124,9 @@ async fn refresh(
     State(state): State<AppState>,
     Json(payload): Json<RefreshRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
-    let refresh_token = payload.refresh_token.trim();
-    if refresh_token.is_empty() {
-        return Err(AppError::BadRequest(
-            "refresh_token is required".to_string(),
-        ));
-    }
+    let input = RefreshInput::try_from(payload)?;
 
-    let token_hash = hash_refresh_token(refresh_token);
+    let token_hash = hash_refresh_token(&input.refresh_token);
     let now = Utc::now().fixed_offset();
 
     let found = refresh_tokens::find_by_hash(&state.db, &token_hash)
@@ -248,13 +185,8 @@ async fn logout(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,
 ) -> AppResult<StatusCode> {
-    let refresh_token = payload.refresh_token.trim();
-    if refresh_token.is_empty() {
-        return Err(AppError::BadRequest(
-            "refresh_token is required".to_string(),
-        ));
-    }
-    let token_hash = hash_refresh_token(refresh_token);
+    let input = LogoutInput::try_from(payload)?;
+    let token_hash = hash_refresh_token(&input.refresh_token);
     refresh_tokens::delete_by_hash(&state.db, &token_hash).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -280,7 +212,7 @@ async fn issue_tokens(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
-    refresh_tokens::insert(
+    refresh_tokens::create(
         &state.db,
         refresh_tokens::NewRefreshToken {
             id: Uuid::new_v4(),

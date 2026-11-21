@@ -7,7 +7,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
 use migration::{Migrator, MigratorTrait};
-use password_manager::{app, config::Config, state::AppState};
+use password_manager::{app, config::Config};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ async fn setup() -> (
     let redis = ConnectionManager::new(redis_client)
         .await
         .expect("redis connect");
-    let router = app::build_router(AppState {
+    let router = app::build_router(app::state::AppState {
         db: db.clone(),
         redis: redis.clone(),
         config,
