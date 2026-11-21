@@ -1,7 +1,11 @@
 [package]
-name = "password_manager_cli"
+name = "passman"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "passman"
+path = "src/main.rs"
 
 [dependencies]
 password_manager_client = { path = "../client" }
