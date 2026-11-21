@@ -6,7 +6,6 @@ use axum::{
     http::StatusCode,
     routing::post,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{Duration as ChronoDuration, Utc};
 use redis::AsyncCommands;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
@@ -94,15 +93,10 @@ async fn register(
     let email_normalized = normalize_email(&payload.email);
     validate_email(&email_normalized)?;
 
-    if payload.auth_verifier.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "auth_verifier is required".to_string(),
-        ));
-    }
+    let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
     let kdf_salt = decode_base64("kdf_salt", &payload.kdf_salt)?;
-    if kdf_salt.is_empty() {
-        return Err(AppError::BadRequest("kdf_salt is required".to_string()));
-    }
+    super::validation::validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
+    super::validation::validate_len("kdf_salt", &kdf_salt, 16, 64)?;
 
     let existing = user::Entity::find()
         .filter(user::Column::EmailNormalized.eq(&email_normalized))
@@ -112,7 +106,6 @@ async fn register(
         return Err(AppError::Conflict("email already registered".to_string()));
     }
 
-    let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
     let password_hash = hash_auth_verifier(&verifier_bytes)?;
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
@@ -147,11 +140,15 @@ async fn prelogin(
     let user = user::Entity::find()
         .filter(user::Column::EmailNormalized.eq(&email_normalized))
         .one(&state.db)
-        .await?
-        .ok_or(AppError::NotFound)?;
+        .await?;
+
+    let kdf_salt = match user {
+        Some(u) => u.kdf_salt,
+        None => fake_kdf_salt(&state.config.jwt_secret, &email_normalized),
+    };
 
     Ok(Json(PreloginResponse {
-        kdf_salt: encode_base64(&user.kdf_salt),
+        kdf_salt: encode_base64(&kdf_salt),
     }))
 }
 
@@ -177,6 +174,7 @@ async fn login(
         .ok_or(AppError::Unauthorized)?;
 
     let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
+    super::validation::validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
     let ok = verify_auth_verifier(&verifier_bytes, &user.password_hash)?;
     if !ok {
         return Err(AppError::Unauthorized);
@@ -189,13 +187,14 @@ async fn refresh(
     State(state): State<AppState>,
     Json(payload): Json<RefreshRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
-    if payload.refresh_token.trim().is_empty() {
+    let refresh_token = payload.refresh_token.trim();
+    if refresh_token.is_empty() {
         return Err(AppError::BadRequest(
             "refresh_token is required".to_string(),
         ));
     }
 
-    let token_hash = hash_refresh_token(&payload.refresh_token);
+    let token_hash = hash_refresh_token(refresh_token);
     let now = Utc::now().fixed_offset();
 
     let found = refresh_token::Entity::find()
@@ -261,17 +260,26 @@ async fn logout(
     State(state): State<AppState>,
     Json(payload): Json<LogoutRequest>,
 ) -> AppResult<StatusCode> {
-    if payload.refresh_token.trim().is_empty() {
+    let refresh_token = payload.refresh_token.trim();
+    if refresh_token.is_empty() {
         return Err(AppError::BadRequest(
             "refresh_token is required".to_string(),
         ));
     }
-    let token_hash = hash_refresh_token(&payload.refresh_token);
+    let token_hash = hash_refresh_token(refresh_token);
     refresh_token::Entity::delete_many()
         .filter(refresh_token::Column::TokenHash.eq(token_hash))
         .exec(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn fake_kdf_salt(secret: &str, email_normalized: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(secret.as_bytes());
+    hasher.update(b":prelogin:");
+    hasher.update(email_normalized.as_bytes());
+    hasher.finalize()[..16].to_vec()
 }
 
 async fn issue_tokens(
@@ -311,7 +319,7 @@ async fn issue_tokens(
         token_type: "Bearer",
         access_expires_in_secs: state.config.access_token_ttl.as_secs(),
         refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
-        kdf_salt: BASE64.encode(kdf_salt),
+        kdf_salt: encode_base64(kdf_salt),
     }))
 }
 

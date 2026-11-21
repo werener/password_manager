@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod credentials;
+mod validation;
 
 use axum::{Router, routing::get};
 

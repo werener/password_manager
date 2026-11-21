@@ -4,17 +4,21 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::get,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    crypto::decode_access_token,
+    crypto::{decode_access_token, decode_base64, encode_base64},
     error::{AppError, AppResult},
     models::credential,
     state::AppState,
+};
+
+use super::validation::{
+    double_option, validate_credential_metadata, validate_idempotency_key, validate_opt_text,
+    validate_secret, validate_text,
 };
 
 pub fn router() -> Router<AppState> {
@@ -43,9 +47,12 @@ pub struct CreateCredentialRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateCredentialRequest {
     pub name: Option<String>,
-    pub username: Option<String>,
-    pub url: Option<String>,
-    pub notes: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub username: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub notes: Option<Option<String>>,
     /// Client-side encrypted secret (opaque to server in zero-knowledge mode).
     pub password_ciphertext: Option<String>,
     /// Nonce used by client-side encryption.
@@ -80,11 +87,16 @@ async fn create_credential(
     let user_id = authenticate(&state, &headers)?;
     let idempotency_key = required_idempotency_key(&headers)?;
 
-    if payload.name.trim().is_empty() {
-        return Err(AppError::BadRequest("name is required".to_string()));
-    }
-    let ciphertext = decode_b64("password_ciphertext", &payload.password_ciphertext)?;
-    let nonce = decode_b64("password_nonce", &payload.password_nonce)?;
+    validate_credential_metadata(
+        &payload.name,
+        &payload.username,
+        &payload.url,
+        &payload.notes,
+    )?;
+    validate_idempotency_key(&idempotency_key)?;
+    let ciphertext = decode_base64("password_ciphertext", &payload.password_ciphertext)?;
+    let nonce = decode_base64("password_nonce", &payload.password_nonce)?;
+    validate_secret(&ciphertext, &nonce)?;
 
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
@@ -93,7 +105,7 @@ async fn create_credential(
         user_id: Set(user_id),
         idempotency_key: Set(Some(idempotency_key.clone())),
         name: Set(payload.name.trim().to_string()),
-        username: Set(payload.username),
+        username: Set(payload.username.map(|v| v.trim().to_string())),
         url: Set(payload.url),
         notes: Set(payload.notes),
         password_ciphertext: Set(ciphertext),
@@ -160,24 +172,28 @@ async fn update_credential(
 
     let mut active: credential::ActiveModel = row.into();
     if let Some(name) = payload.name {
-        if name.trim().is_empty() {
-            return Err(AppError::BadRequest("name cannot be empty".to_string()));
-        }
+        validate_text("name", &name, 1, 200)?;
         active.name = Set(name.trim().to_string());
     }
     if let Some(username) = payload.username {
-        active.username = Set(Some(username));
+        validate_opt_text("username", &username, 200)?;
+        active.username = Set(username.map(|v| v.trim().to_string()));
     }
     if let Some(url) = payload.url {
-        active.url = Set(Some(url));
+        validate_opt_text("url", &url, 2048)?;
+        active.url = Set(url);
     }
     if let Some(notes) = payload.notes {
-        active.notes = Set(Some(notes));
+        validate_opt_text("notes", &notes, 512)?;
+        active.notes = Set(notes);
     }
     match (payload.password_ciphertext, payload.password_nonce) {
         (Some(ct), Some(nonce)) => {
-            active.password_ciphertext = Set(decode_b64("password_ciphertext", &ct)?);
-            active.password_nonce = Set(decode_b64("password_nonce", &nonce)?);
+            let ct = decode_base64("password_ciphertext", &ct)?;
+            let nonce = decode_base64("password_nonce", &nonce)?;
+            validate_secret(&ct, &nonce)?;
+            active.password_ciphertext = Set(ct);
+            active.password_nonce = Set(nonce);
         }
         (None, None) => {}
         _ => {
@@ -240,17 +256,14 @@ fn to_response(row: credential::Model) -> CredentialResponse {
         username: row.username,
         url: row.url,
         notes: row.notes,
-        password_ciphertext: BASE64.encode(row.password_ciphertext),
-        password_nonce: BASE64.encode(row.password_nonce),
+        password_ciphertext: encode_base64(&row.password_ciphertext),
+        password_nonce: encode_base64(&row.password_nonce),
     }
 }
 
-fn decode_b64(field: &'static str, value: &str) -> AppResult<Vec<u8>> {
-    BASE64
-        .decode(value)
-        .map_err(|_| AppError::BadRequest(format!("{field} must be valid base64")))
-}
-
 fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    err.to_string().to_lowercase().contains("unique")
+    matches!(
+        err.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    )
 }
