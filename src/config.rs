@@ -7,7 +7,7 @@ use crate::error::ConfigError;
 /// Runtime configuration loaded from environment variables.
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub bind_addr: SocketAddr,
+    pub backend_url: SocketAddr,
     pub database_url: String,
     pub redis_url: String,
     pub jwt_secret: String,
@@ -20,14 +20,14 @@ pub struct Config {
 impl Config {
     /// Loads configuration from environment variables.
     pub fn from_env() -> Result<Self, ConfigError> {
-        let bind_addr_raw = require_env("BIND_ADDR")?;
-        let bind_addr = bind_addr_raw.parse().map_err(|e| ConfigError::Invalid {
-            name: "BIND_ADDR",
+        let backend_url_raw = require_env("BACKEND_URL")?;
+        let backend_url = backend_url_raw.parse().map_err(|e| ConfigError::Invalid {
+            name: "BACKEND_URL",
             message: format!("{e}"),
         })?;
 
         Ok(Self {
-            bind_addr,
+            backend_url,
             database_url: require_env("DATABASE_URL")?,
             redis_url: require_env("REDIS_URL")?,
             jwt_secret: require_env("JWT_SECRET")?,

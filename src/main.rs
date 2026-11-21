@@ -16,9 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let config = Config::from_env()?;
-    tracing::info!(bind_addr = %config.bind_addr, "configuration loaded");
+    tracing::info!(backend_url = %config.backend_url, "configuration loaded");
 
-    let bind_addr = config.bind_addr;
+    let backend_url = config.backend_url;
     let state = app::build_state(config).await?;
     tracing::info!("database connection established");
     tracing::info!("database migrations applied");
@@ -27,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = state.db.clone();
     let app = app::build_router(state);
 
-    let listener = TcpListener::bind(bind_addr).await?;
-    tracing::info!(%bind_addr, "listening");
+    let listener = TcpListener::bind(backend_url).await?;
+    tracing::info!(%backend_url, "listening");
 
     axum::serve(
         listener,

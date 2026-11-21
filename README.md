@@ -7,6 +7,23 @@ A small password-vault backend API. It provides user authentication and CRUD for
 - Protect credential endpoints with bearer access tokens.
 - Support refresh-token rotation and logout.
 
+## Run with Docker Compose
+
+Copy `.env.example` to `.env` and adjust values as needed. For Docker Compose, set service-host URLs in `.env`:
+
+```env
+DATABASE_URL=postgres://password_manager:password_manager@postgres:5432/password_manager
+REDIS_URL=redis://redis:6379
+```
+
+Then run:
+
+```bash
+docker compose up --build
+```
+
+This starts Postgres, Redis, and the backend on `http://localhost:3000`. Migrations are applied automatically on backend startup. Compose reads configuration from `.env`.
+
 ## API
 
 ### Health
