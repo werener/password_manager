@@ -16,6 +16,20 @@ Then run:
 docker compose up --build
 ```
 
+## Build passman from source
+
+Requires a Rust toolchain.
+
+```bash
+cargo build --release -p passman
+```
+
+The binary will be at `target/release/passman`. You can also install it into Cargo's bin directory:
+
+```bash
+cargo install --path crates/passman
+```
+
 ## API
 
 ### Health
