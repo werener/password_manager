@@ -10,6 +10,7 @@ A small password-vault backend API. It provides user authentication and CRUD for
 ## Passman
 
 ### Subcommands
+```
 server    Set backend server URL
 config    Show current configuration and session status
 register  Register a new account
@@ -20,7 +21,8 @@ list      List credentials
 get       Get a credential by id
 edit      Edit a credential by id
 delete    Delete a credential by id
-help      Print this message or the help of the given subcommand(s)
+help      Print this message
+```
 
 ### Build from source
 Requires a Rust toolchain.
