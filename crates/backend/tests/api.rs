@@ -45,7 +45,6 @@ async fn setup() -> (
         db: db.clone(),
         redis: redis.clone(),
         config,
-        fail_access_mint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
     let router = app::build_router(state.clone());
     let svc = router.into_service().boxed_clone();
@@ -607,9 +606,14 @@ async fn login_does_not_persist_refresh_token_when_access_mint_fails() {
         .unwrap()
         .expect("user exists");
 
-    let _guard = password_manager_backend::app::routers::fail_access_mint_test_guard(&state);
+    let fail_app = app::build_router(state.clone()).layer(axum::Extension(
+        password_manager_backend::app::routers::auth::AccessTokenMinterExt(std::sync::Arc::new(
+            |_, _, _, _| Err(password_manager_backend::error::AppError::Internal),
+        )),
+    ));
+    let mut fail_app = fail_app.into_service().boxed_clone();
     let (status, body) = request(
-        &mut app,
+        &mut fail_app,
         json_req(
             Method::POST,
             "/auth/login",
@@ -617,7 +621,6 @@ async fn login_does_not_persist_refresh_token_when_access_mint_fails() {
         ),
     )
     .await;
-    drop(_guard);
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
     let count = password_manager_backend::db::models::refresh_token::Entity::find()
@@ -665,9 +668,14 @@ async fn refresh_does_not_rotate_when_access_mint_fails() {
     assert_eq!(status, StatusCode::OK, "{login}");
     let refresh = login["refresh_token"].as_str().unwrap().to_string();
 
-    let _guard = password_manager_backend::app::routers::fail_access_mint_test_guard(&state);
+    let fail_app = app::build_router(state.clone()).layer(axum::Extension(
+        password_manager_backend::app::routers::auth::AccessTokenMinterExt(std::sync::Arc::new(
+            |_, _, _, _| Err(password_manager_backend::error::AppError::Internal),
+        )),
+    ));
+    let mut fail_app = fail_app.into_service().boxed_clone();
     let (status, body) = request(
-        &mut app,
+        &mut fail_app,
         json_req(
             Method::POST,
             "/auth/refresh",
@@ -675,7 +683,6 @@ async fn refresh_does_not_rotate_when_access_mint_fails() {
         ),
     )
     .await;
-    drop(_guard);
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
 

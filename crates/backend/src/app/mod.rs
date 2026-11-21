@@ -36,12 +36,7 @@ pub async fn build_state(config: Config) -> Result<AppState, AppError> {
     let db = connect_db(&config).await?;
     Migrator::up(&db, None).await?;
     let redis = connect_redis(&config).await?;
-    Ok(AppState {
-        db,
-        redis,
-        config,
-        fail_access_mint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    })
+    Ok(AppState { db, redis, config })
 }
 
 /// Builds the Axum router for the given application state.

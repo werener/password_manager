@@ -1,7 +1,9 @@
 use std::net::SocketAddr;
 
+use std::{sync::Arc, time::Duration};
+
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     routing::post,
@@ -27,6 +29,18 @@ use crate::{
     db::queries::{refresh_tokens, users},
     error::{AppError, AppResult},
 };
+
+pub type AccessTokenMinter =
+    Arc<dyn Fn(&str, Uuid, Uuid, Duration) -> AppResult<String> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct AccessTokenMinterExt(pub AccessTokenMinter);
+
+impl Default for AccessTokenMinterExt {
+    fn default() -> Self {
+        Self(Arc::new(create_access_token))
+    }
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -97,6 +111,7 @@ async fn prelogin(
 async fn login(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    minter: Option<Extension<AccessTokenMinterExt>>,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
     let input = LoginInput::try_from(payload)?;
@@ -117,11 +132,12 @@ async fn login(
         return Err(AppError::Unauthorized);
     }
 
-    issue_tokens(&state, user.id, &user.kdf_salt).await
+    issue_tokens(&state, &minter_ext(minter), user.id, &user.kdf_salt).await
 }
 
 async fn refresh(
     State(state): State<AppState>,
+    minter: Option<Extension<AccessTokenMinterExt>>,
     Json(payload): Json<RefreshRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
     let input = RefreshInput::try_from(payload)?;
@@ -143,7 +159,7 @@ async fn refresh(
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    let access_token = mint_access_token(&state, found.user_id, found.session_id)?;
+    let access_token = mint_access_token(&state, &minter_ext(minter), found.user_id, found.session_id)?;
 
     let rotated = refresh_tokens::rotate_by_hash(
         &state.db,
@@ -187,34 +203,17 @@ fn fake_kdf_salt(secret: &str, email_normalized: &str) -> Vec<u8> {
     hasher.finalize()[..16].to_vec()
 }
 
-pub struct FailAccessMintGuard {
-    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+fn minter_ext(m: Option<Extension<AccessTokenMinterExt>>) -> AccessTokenMinterExt {
+    m.map(|Extension(v)| v).unwrap_or_default()
 }
 
-impl Drop for FailAccessMintGuard {
-    fn drop(&mut self) {
-        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-#[doc(hidden)]
-pub fn fail_access_mint_test_guard(state: &AppState) -> FailAccessMintGuard {
-    state
-        .fail_access_mint
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    FailAccessMintGuard {
-        flag: state.fail_access_mint.clone(),
-    }
-}
-
-fn mint_access_token(state: &AppState, user_id: Uuid, session_id: Uuid) -> AppResult<String> {
-    if state
-        .fail_access_mint
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
-        return Err(AppError::Internal);
-    }
-    create_access_token(
+fn mint_access_token(
+    state: &AppState,
+    minter: &AccessTokenMinterExt,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> AppResult<String> {
+    (minter.0)(
         &state.config.jwt_secret,
         user_id,
         session_id,
@@ -224,6 +223,7 @@ fn mint_access_token(state: &AppState, user_id: Uuid, session_id: Uuid) -> AppRe
 
 async fn issue_tokens(
     state: &AppState,
+    minter: &AccessTokenMinterExt,
     user_id: Uuid,
     kdf_salt: &[u8],
 ) -> AppResult<Json<AuthTokensResponse>> {
@@ -235,7 +235,7 @@ async fn issue_tokens(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
-    let access_token = mint_access_token(state, user_id, session_id)?;
+    let access_token = mint_access_token(state, minter, user_id, session_id)?;
 
     refresh_tokens::create(
         &state.db,
