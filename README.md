@@ -20,7 +20,8 @@ docker compose up --build
 
 ### Health
 
-- `GET /health` -> `200 ok`
+- `GET /health` -> `200` when all dependencies are healthy, `503` when degraded
+  - Response: `{ "status": "ok"|"degraded", "db": "up"|"down", "redis": "up"|"down" }`
 
 ### Auth
 
