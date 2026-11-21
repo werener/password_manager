@@ -20,6 +20,8 @@ pub enum AppError {
     Conflict(String),
     #[error("too many requests")]
     TooManyRequests,
+    #[error("not implemented: {0}")]
+    NotImplemented(&'static str),
     #[error("internal error")]
     Internal,
     #[error(transparent)]
@@ -38,10 +40,7 @@ pub enum ConfigError {
     Missing(&'static str),
 
     #[error("invalid environment variable {name}: {message}")]
-    Invalid {
-        name: &'static str,
-        message: String,
-    },
+    Invalid { name: &'static str, message: String },
 }
 
 #[derive(Serialize)]
@@ -81,6 +80,12 @@ impl IntoResponse for AppError {
                 StatusCode::TOO_MANY_REQUESTS,
                 "too_many_requests",
                 "Too many requests".to_string(),
+                false,
+            ),
+            AppError::NotImplemented(feature) => (
+                StatusCode::NOT_IMPLEMENTED,
+                "not_implemented",
+                format!("{feature} is not implemented yet"),
                 false,
             ),
             AppError::Internal | AppError::Database(_) | AppError::Redis(_) => (
