@@ -8,7 +8,6 @@ use axum::{
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use redis::AsyncCommands;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -19,7 +18,7 @@ use crate::{
         hash_auth_verifier, hash_refresh_token, normalize_email, validate_email,
         verify_auth_verifier,
     },
-    db::models::{refresh_token, user},
+    db::queries::{refresh_tokens, users},
     error::{AppError, AppResult},
     state::AppState,
 };
@@ -98,11 +97,10 @@ async fn register(
     super::validation::validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
     super::validation::validate_len("kdf_salt", &kdf_salt, 16, 64)?;
 
-    let existing = user::Entity::find()
-        .filter(user::Column::EmailNormalized.eq(&email_normalized))
-        .one(&state.db)
-        .await?;
-    if existing.is_some() {
+    if users::find_by_email_normalized(&state.db, &email_normalized)
+        .await?
+        .is_some()
+    {
         return Err(AppError::Conflict("email already registered".to_string()));
     }
 
@@ -110,16 +108,18 @@ async fn register(
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
 
-    let model = user::ActiveModel {
-        id: Set(id),
-        email: Set(payload.email.trim().to_string()),
-        email_normalized: Set(email_normalized),
-        password_hash: Set(password_hash),
-        kdf_salt: Set(kdf_salt),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    model.insert(&state.db).await?;
+    users::create(
+        &state.db,
+        users::NewUser {
+            id,
+            email: payload.email.trim().to_string(),
+            email_normalized,
+            password_hash,
+            kdf_salt,
+            now,
+        },
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -137,10 +137,7 @@ async fn prelogin(
     let email_normalized = normalize_email(&payload.email);
     validate_email(&email_normalized)?;
 
-    let user = user::Entity::find()
-        .filter(user::Column::EmailNormalized.eq(&email_normalized))
-        .one(&state.db)
-        .await?;
+    let user = users::find_by_email_normalized(&state.db, &email_normalized).await?;
 
     let kdf_salt = match user {
         Some(u) => u.kdf_salt,
@@ -167,9 +164,7 @@ async fn login(
 
     enforce_login_rate_limit(&state, addr.ip().to_string().as_str(), &email_normalized).await?;
 
-    let user = user::Entity::find()
-        .filter(user::Column::EmailNormalized.eq(&email_normalized))
-        .one(&state.db)
+    let user = users::find_by_email_normalized(&state.db, &email_normalized)
         .await?
         .ok_or(AppError::Unauthorized)?;
 
@@ -197,21 +192,16 @@ async fn refresh(
     let token_hash = hash_refresh_token(refresh_token);
     let now = Utc::now().fixed_offset();
 
-    let found = refresh_token::Entity::find()
-        .filter(refresh_token::Column::TokenHash.eq(token_hash.clone()))
-        .one(&state.db)
+    let found = refresh_tokens::find_by_hash(&state.db, &token_hash)
         .await?
         .ok_or(AppError::Unauthorized)?;
 
     if found.expires_at <= now {
-        let _ = refresh_token::Entity::delete_by_id(found.id)
-            .exec(&state.db)
-            .await;
+        let _ = refresh_tokens::delete_by_id(&state.db, found.id).await;
         return Err(AppError::Unauthorized);
     }
 
-    let user = user::Entity::find_by_id(found.user_id)
-        .one(&state.db)
+    let user = users::find_by_id(&state.db, found.user_id)
         .await?
         .ok_or(AppError::Unauthorized)?;
 
@@ -223,21 +213,19 @@ async fn refresh(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
-    let txn = state.db.begin().await?;
-    refresh_token::Entity::delete_by_id(found.id)
-        .exec(&txn)
-        .await?;
-    refresh_token::ActiveModel {
-        id: Set(new_id),
-        user_id: Set(found.user_id),
-        session_id: Set(found.session_id),
-        token_hash: Set(new_hash),
-        expires_at: Set(expires_at),
-        created_at: Set(Utc::now().fixed_offset()),
-    }
-    .insert(&txn)
+    refresh_tokens::rotate(
+        &state.db,
+        found.id,
+        refresh_tokens::NewRefreshToken {
+            id: new_id,
+            user_id: found.user_id,
+            session_id: found.session_id,
+            token_hash: new_hash,
+            expires_at,
+            created_at: Utc::now().fixed_offset(),
+        },
+    )
     .await?;
-    txn.commit().await?;
 
     let access_token = create_access_token(
         &state.config.jwt_secret,
@@ -267,10 +255,7 @@ async fn logout(
         ));
     }
     let token_hash = hash_refresh_token(refresh_token);
-    refresh_token::Entity::delete_many()
-        .filter(refresh_token::Column::TokenHash.eq(token_hash))
-        .exec(&state.db)
-        .await?;
+    refresh_tokens::delete_by_hash(&state.db, &token_hash).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -295,15 +280,17 @@ async fn issue_tokens(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
-    refresh_token::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(user_id),
-        session_id: Set(session_id),
-        token_hash: Set(refresh_hash),
-        expires_at: Set(expires_at),
-        created_at: Set(Utc::now().fixed_offset()),
-    }
-    .insert(&state.db)
+    refresh_tokens::insert(
+        &state.db,
+        refresh_tokens::NewRefreshToken {
+            id: Uuid::new_v4(),
+            user_id,
+            session_id,
+            token_hash: refresh_hash,
+            expires_at,
+            created_at: Utc::now().fixed_offset(),
+        },
+    )
     .await?;
 
     let access_token = create_access_token(

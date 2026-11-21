@@ -5,13 +5,13 @@ use axum::{
     routing::get,
 };
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
     crypto::{decode_access_token, decode_base64, encode_base64},
-    db::models::credential,
+    db::{models::credential, queries::credentials},
     error::{AppError, AppResult},
     state::AppState,
 };
@@ -100,21 +100,23 @@ async fn create_credential(
 
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
-    let model = credential::ActiveModel {
-        id: Set(id),
-        user_id: Set(user_id),
-        idempotency_key: Set(Some(idempotency_key.clone())),
-        name: Set(payload.name.trim().to_string()),
-        username: Set(payload.username.map(|v| v.trim().to_string())),
-        url: Set(payload.url),
-        notes: Set(payload.notes),
-        password_ciphertext: Set(ciphertext),
-        password_nonce: Set(nonce),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-
-    match model.insert(&state.db).await {
+    match credentials::create(
+        &state.db,
+        credentials::NewCredential {
+            id,
+            user_id,
+            idempotency_key: idempotency_key.clone(),
+            name: payload.name.trim().to_string(),
+            username: payload.username.map(|v| v.trim().to_string()),
+            url: payload.url,
+            notes: payload.notes,
+            password_ciphertext: ciphertext,
+            password_nonce: nonce,
+            now,
+        },
+    )
+    .await
+    {
         Ok(saved) => Ok((StatusCode::CREATED, Json(to_response(saved)))),
         Err(e) => {
             if is_unique_violation(&e) {
@@ -132,11 +134,7 @@ async fn list_credentials(
     headers: HeaderMap,
 ) -> AppResult<Json<Vec<CredentialMetadataResponse>>> {
     let user_id = authenticate(&state, &headers)?;
-    let rows = credential::Entity::find()
-        .filter(credential::Column::UserId.eq(user_id))
-        .order_by_desc(credential::Column::CreatedAt)
-        .all(&state.db)
-        .await?;
+    let rows = credentials::list_by_user(&state.db, user_id).await?;
 
     Ok(Json(
         rows.into_iter()
@@ -204,7 +202,7 @@ async fn update_credential(
     }
     active.updated_at = Set(Utc::now().fixed_offset());
 
-    let saved = active.update(&state.db).await?;
+    let saved = credentials::update(&state.db, active).await?;
     Ok(Json(to_response(saved)))
 }
 
@@ -215,9 +213,7 @@ async fn delete_credential(
 ) -> AppResult<StatusCode> {
     let user_id = authenticate(&state, &headers)?;
     let row = find_owned(&state, user_id, id).await?;
-    credential::Entity::delete_by_id(row.id)
-        .exec(&state.db)
-        .await?;
+    credentials::delete_by_id(&state.db, row.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -242,9 +238,7 @@ fn required_idempotency_key(headers: &HeaderMap) -> AppResult<String> {
 }
 
 async fn find_owned(state: &AppState, user_id: Uuid, id: Uuid) -> AppResult<credential::Model> {
-    credential::Entity::find_by_id(id)
-        .filter(credential::Column::UserId.eq(user_id))
-        .one(&state.db)
+    credentials::find_owned(&state.db, user_id, id)
         .await?
         .ok_or(AppError::NotFound)
 }
