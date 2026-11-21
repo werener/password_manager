@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::{
     crypto::{decode_access_token, decode_base64, encode_base64},
+    db::models::credential,
     error::{AppError, AppResult},
-    models::credential,
     state::AppState,
 };
 

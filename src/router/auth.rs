@@ -19,8 +19,8 @@ use crate::{
         hash_auth_verifier, hash_refresh_token, normalize_email, validate_email,
         verify_auth_verifier,
     },
+    db::models::{refresh_token, user},
     error::{AppError, AppResult},
-    models::{refresh_token, user},
     state::AppState,
 };
 

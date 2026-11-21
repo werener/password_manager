@@ -32,8 +32,13 @@ fn access_token_roundtrip() {
     let secret = "test-secret";
     let user_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
-    let token = create_access_token(secret, user_id, session_id, std::time::Duration::from_secs(60))
-        .expect("token");
+    let token = create_access_token(
+        secret,
+        user_id,
+        session_id,
+        std::time::Duration::from_secs(60),
+    )
+    .expect("token");
     let claims = decode_access_token(secret, &token).expect("claims");
     assert_eq!(claims.sub, user_id);
     assert_eq!(claims.sid, session_id);

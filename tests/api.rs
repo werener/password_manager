@@ -7,7 +7,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
 use migration::{Migrator, MigratorTrait};
-use password_manager::{config::Config, router::build_router, state::AppState};
+use password_manager::{app, config::Config, state::AppState};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use serde_json::{Value, json};
@@ -40,7 +40,7 @@ async fn setup() -> (
     let redis = ConnectionManager::new(redis_client)
         .await
         .expect("redis connect");
-    let router = build_router(AppState {
+    let router = app::build_router(AppState {
         db: db.clone(),
         redis: redis.clone(),
         config,
@@ -59,7 +59,8 @@ async fn request(
     let json = if body.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&body).unwrap_or_else(|_| json!({"raw": String::from_utf8_lossy(&body)}))
+        serde_json::from_slice(&body)
+            .unwrap_or_else(|_| json!({"raw": String::from_utf8_lossy(&body)}))
     };
     (status, json)
 }
@@ -79,15 +80,20 @@ fn json_req(method: Method, uri: &str, body: Value) -> Request<Body> {
         .method(method)
         .uri(uri)
         .header(header::CONTENT_TYPE, "application/json")
-        .extension(axum::extract::ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40000))))
+        .extension(axum::extract::ConnectInfo(SocketAddr::from((
+            [127, 0, 0, 1],
+            40000,
+        ))))
         .body(Body::from(body.to_string()))
         .unwrap()
 }
 
 fn auth_json_req(method: Method, uri: &str, token: &str, body: Value) -> Request<Body> {
     let mut req = json_req(method, uri, body);
-    req.headers_mut()
-        .insert(header::AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
+    req.headers_mut().insert(
+        header::AUTHORIZATION,
+        format!("Bearer {token}").parse().unwrap(),
+    );
     req
 }
 
@@ -104,7 +110,9 @@ fn auth_req(method: Method, uri: &str, token: &str) -> Request<Body> {
         .unwrap()
 }
 
-fn b64(bytes: &[u8]) -> String { BASE64.encode(bytes) }
+fn b64(bytes: &[u8]) -> String {
+    BASE64.encode(bytes)
+}
 
 #[tokio::test]
 async fn auth_flow_and_credentials_flow() {
@@ -114,26 +122,62 @@ async fn auth_flow_and_credentials_flow() {
     let kdf_salt = b64(&[1u8; 16]);
 
     // register
-    let (status, body) = request(&mut app, json_req(Method::POST, "/auth/register", json!({"email":email,"auth_verifier":verifier,"kdf_salt":kdf_salt}))).await;
+    let (status, body) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email":email,"auth_verifier":verifier,"kdf_salt":kdf_salt}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert!(body["user_id"].is_string());
 
     // prelogin
-    let (status, body) = request(&mut app, json_req(Method::POST, "/auth/prelogin", json!({"email":email}))).await;
+    let (status, body) = request(
+        &mut app,
+        json_req(Method::POST, "/auth/prelogin", json!({"email":email})),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["kdf_salt"], kdf_salt);
 
     // prelogin unknown email - no enumeration
-    let (status, body) = request(&mut app, json_req(Method::POST, "/auth/prelogin", json!({"email":"unknown@example.com"}))).await;
+    let (status, body) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/prelogin",
+            json!({"email":"unknown@example.com"}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["kdf_salt"].is_string());
 
     // login wrong verifier
-    let (status, _) = request(&mut app, json_req(Method::POST, "/auth/login", json!({"email":email,"auth_verifier":b64(b"wrong")}))).await;
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email":email,"auth_verifier":b64(b"wrong")}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // login ok
-    let (status, login) = request(&mut app, json_req(Method::POST, "/auth/login", json!({"email":email,"auth_verifier":verifier}))).await;
+    let (status, login) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email":email,"auth_verifier":verifier}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{login}");
     let access = login["access_token"].as_str().unwrap();
     let refresh = login["refresh_token"].as_str().unwrap().to_string();
@@ -141,44 +185,89 @@ async fn auth_flow_and_credentials_flow() {
     // create credential
     let create_body = json!({"name":"n","username":"u","url":"https://x","notes":"note","password_ciphertext":b64(b"ct"),"password_nonce":b64(b"nonce1234567")});
     let mut create_req = auth_json_req(Method::POST, "/credentials", access, create_body.clone());
-    create_req.headers_mut().insert("Idempotency-Key", "idem-1".parse().unwrap());
+    create_req
+        .headers_mut()
+        .insert("Idempotency-Key", "idem-1".parse().unwrap());
     let (status, created) = request(&mut app, create_req).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let id = created["id"].as_str().unwrap().to_string();
 
     // duplicate idempotency
     let mut dup_req = auth_json_req(Method::POST, "/credentials", access, create_body.clone());
-    dup_req.headers_mut().insert("Idempotency-Key", "idem-1".parse().unwrap());
+    dup_req
+        .headers_mut()
+        .insert("Idempotency-Key", "idem-1".parse().unwrap());
     let (status, _) = request(&mut app, dup_req).await;
     assert_eq!(status, StatusCode::CONFLICT);
 
     // missing idempotency
-    let (status, _) = request(&mut app, auth_json_req(Method::POST, "/credentials", access, create_body.clone())).await;
+    let (status, _) = request(
+        &mut app,
+        auth_json_req(Method::POST, "/credentials", access, create_body.clone()),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // list/get
     let (status, list) = request(&mut app, auth_req(Method::GET, "/credentials", access)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(list.as_array().unwrap().len(), 1);
-    let (status, got) = request(&mut app, auth_req(Method::GET, &format!("/credentials/{id}"), access)).await;
+    let (status, got) = request(
+        &mut app,
+        auth_req(Method::GET, &format!("/credentials/{id}"), access),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(got["password_ciphertext"], b64(b"ct"));
 
     // update clear notes
-    let (status, upd) = request(&mut app, auth_json_req(Method::PUT, &format!("/credentials/{id}"), access, json!({"notes":null}))).await;
+    let (status, upd) = request(
+        &mut app,
+        auth_json_req(
+            Method::PUT,
+            &format!("/credentials/{id}"),
+            access,
+            json!({"notes":null}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{upd}");
     assert!(upd["notes"].is_null());
 
     // refresh rotation
-    let (status, refreshed) = request(&mut app, json_req(Method::POST, "/auth/refresh", json!({"refresh_token":refresh}))).await;
+    let (status, refreshed) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token":refresh}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{refreshed}");
     let refresh2 = refreshed["refresh_token"].as_str().unwrap().to_string();
     // old refresh should fail
-    let (status, _) = request(&mut app, json_req(Method::POST, "/auth/refresh", json!({"refresh_token":login["refresh_token"]}))).await;
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token":login["refresh_token"]}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // logout
-    let (status, _) = request(&mut app, json_req(Method::POST, "/auth/logout", json!({"refresh_token":refresh2}))).await;
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/logout",
+            json!({"refresh_token":refresh2}),
+        ),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     // cleanup
@@ -233,7 +322,11 @@ async fn login_rate_limit_and_auth_errors() {
 
     let (status, _) = request(
         &mut app,
-        json_req(Method::POST, "/auth/refresh", json!({"refresh_token":"bad"})),
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token":"bad"}),
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -295,24 +388,40 @@ async fn credentials_security_and_validation() {
 
     let create = json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":b64(b"ct"),"password_nonce":b64(b"nonce1234567")});
     let mut req = auth_json_req(Method::POST, "/credentials", token_a, create.clone());
-    req.headers_mut().insert("Idempotency-Key", "k1".parse().unwrap());
+    req.headers_mut()
+        .insert("Idempotency-Key", "k1".parse().unwrap());
     let (status, created) = request(&mut app, req).await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     let id = created["id"].as_str().unwrap();
 
     // owner-scope
-    let (status, _) = request(&mut app, auth_req(Method::GET, &format!("/credentials/{id}"), token_b)).await;
+    let (status, _) = request(
+        &mut app,
+        auth_req(Method::GET, &format!("/credentials/{id}"), token_b),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = request(&mut app, auth_req(Method::DELETE, &format!("/credentials/{id}"), token_b)).await;
+    let (status, _) = request(
+        &mut app,
+        auth_req(Method::DELETE, &format!("/credentials/{id}"), token_b),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // validation
     let mut bad = auth_json_req(Method::POST, "/credentials", token_a, create.clone());
-    bad.headers_mut().insert("Idempotency-Key", "bad key!".parse().unwrap());
+    bad.headers_mut()
+        .insert("Idempotency-Key", "bad key!".parse().unwrap());
     let (status, _) = request(&mut app, bad).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let mut bad2 = auth_json_req(Method::POST, "/credentials", token_a, json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":"not-base64!!","password_nonce":b64(b"nonce1234567")}));
-    bad2.headers_mut().insert("Idempotency-Key", "k2".parse().unwrap());
+    let mut bad2 = auth_json_req(
+        Method::POST,
+        "/credentials",
+        token_a,
+        json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":"not-base64!!","password_nonce":b64(b"nonce1234567")}),
+    );
+    bad2.headers_mut()
+        .insert("Idempotency-Key", "k2".parse().unwrap());
     let (status, _) = request(&mut app, bad2).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
@@ -321,9 +430,17 @@ async fn credentials_security_and_validation() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // delete
-    let (status, _) = request(&mut app, auth_req(Method::DELETE, &format!("/credentials/{id}"), token_a)).await;
+    let (status, _) = request(
+        &mut app,
+        auth_req(Method::DELETE, &format!("/credentials/{id}"), token_a),
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = request(&mut app, auth_req(Method::GET, &format!("/credentials/{id}"), token_a)).await;
+    let (status, _) = request(
+        &mut app,
+        auth_req(Method::GET, &format!("/credentials/{id}"), token_a),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     sqlx_cleanup(&db, &email_a).await;
@@ -334,12 +451,12 @@ async fn credentials_security_and_validation() {
 
 async fn sqlx_cleanup(db: &DatabaseConnection, email: &str) {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    if let Ok(Some(u)) = password_manager::models::user::Entity::find()
-        .filter(password_manager::models::user::Column::Email.eq(email))
+    if let Ok(Some(u)) = password_manager::db::models::user::Entity::find()
+        .filter(password_manager::db::models::user::Column::Email.eq(email))
         .one(db)
         .await
     {
-        let _ = password_manager::models::user::Entity::delete_by_id(u.id)
+        let _ = password_manager::db::models::user::Entity::delete_by_id(u.id)
             .exec(db)
             .await;
     }
@@ -349,9 +466,21 @@ async fn redis_cleanup_login(redis: &mut ConnectionManager, email: &str) {
     let normalized = email.trim().to_lowercase();
     let hash = sha2::Sha256::digest(normalized.as_bytes());
     let key = format!("rl:login:127.0.0.1:{:x}", hash);
-    let _: () = redis::cmd("DEL").arg(&key).query_async(redis).await.unwrap_or(());
+    let _: () = redis::cmd("DEL")
+        .arg(&key)
+        .query_async(redis)
+        .await
+        .unwrap_or(());
     let key9 = format!("rl:login:127.0.0.9:{:x}", hash);
-    let _: () = redis::cmd("DEL").arg(&key9).query_async(redis).await.unwrap_or(());
+    let _: () = redis::cmd("DEL")
+        .arg(&key9)
+        .query_async(redis)
+        .await
+        .unwrap_or(());
     let key8 = format!("rl:login:127.0.0.8:{:x}", hash);
-    let _: () = redis::cmd("DEL").arg(&key8).query_async(redis).await.unwrap_or(());
+    let _: () = redis::cmd("DEL")
+        .arg(&key8)
+        .query_async(redis)
+        .await
+        .unwrap_or(());
 }
