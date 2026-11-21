@@ -8,6 +8,13 @@ name = "passman"
 path = "src/main.rs"
 
 [dependencies]
+password_manager_api_types = { path = "../api-types" }
 password_manager_client = { path = "../client" }
 clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rpassword = "7"
+serde_json = "1"
+thiserror = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+zeroize = "1"
