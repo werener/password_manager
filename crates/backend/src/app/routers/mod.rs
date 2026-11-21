@@ -2,8 +2,6 @@ pub mod auth;
 pub mod credentials;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
-use redis::AsyncCommands;
-use sea_orm::ConnectionTrait;
 use serde::Serialize;
 
 use crate::app::state::AppState;
