@@ -1,3 +1,5 @@
+use std::sync::{Arc, atomic::AtomicBool};
+
 use sea_orm::DatabaseConnection;
 
 use crate::config::Config;
@@ -8,4 +10,5 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub redis: redis::aio::ConnectionManager,
     pub config: Config,
+    pub fail_access_mint: Arc<AtomicBool>,
 }

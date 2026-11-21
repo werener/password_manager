@@ -19,6 +19,7 @@ thiserror = "1"
 toml = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = "1"
+fd-lock = "4"
 
 [dependencies.argon2]
 version = "0.5"

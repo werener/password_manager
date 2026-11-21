@@ -29,6 +29,7 @@ async fn setup() -> (
     BoxCloneService<Request<Body>, axum::response::Response, std::convert::Infallible>,
     DatabaseConnection,
     ConnectionManager,
+    app::state::AppState,
 ) {
     let config = test_config();
     let mut opt = ConnectOptions::new(config.database_url.clone());
@@ -40,13 +41,15 @@ async fn setup() -> (
     let redis = ConnectionManager::new(redis_client)
         .await
         .expect("redis connect");
-    let router = app::build_router(app::state::AppState {
+    let state = app::state::AppState {
         db: db.clone(),
         redis: redis.clone(),
         config,
-    });
+        fail_access_mint: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let router = app::build_router(state.clone());
     let svc = router.into_service().boxed_clone();
-    (svc, db, redis)
+    (svc, db, redis, state)
 }
 
 async fn request(
@@ -116,7 +119,7 @@ fn b64(bytes: &[u8]) -> String {
 
 #[tokio::test]
 async fn auth_flow_and_credentials_flow() {
-    let (mut app, db, mut redis_conn) = setup().await;
+    let (mut app, db, mut redis_conn, _state) = setup().await;
     let email = format!("test+{}@example.com", Uuid::new_v4());
     let verifier = b64(b"verifier-1");
     let kdf_salt = b64(&[1u8; 16]);
@@ -277,7 +280,7 @@ async fn auth_flow_and_credentials_flow() {
 
 #[tokio::test]
 async fn login_rate_limit_and_auth_errors() {
-    let (mut app, db, mut redis_conn) = setup().await;
+    let (mut app, db, mut redis_conn, _state) = setup().await;
     let email = format!("rl+{}@example.com", Uuid::new_v4());
     let verifier = b64(b"verifier-rl");
     let kdf_salt = b64(&[2u8; 16]);
@@ -344,7 +347,7 @@ async fn login_rate_limit_and_auth_errors() {
 
 #[tokio::test]
 async fn credentials_security_and_validation() {
-    let (mut app, db, mut redis_conn) = setup().await;
+    let (mut app, db, mut redis_conn, _state) = setup().await;
     let email_a = format!("a+{}@example.com", Uuid::new_v4());
     let email_b = format!("b+{}@example.com", Uuid::new_v4());
     let verifier = b64(b"verifier");
@@ -483,4 +486,215 @@ async fn redis_cleanup_login(redis: &mut ConnectionManager, email: &str) {
         .query_async(redis)
         .await
         .unwrap_or(());
+}
+
+#[tokio::test]
+async fn refresh_concurrent_same_token_only_one_succeeds() {
+    let (mut app, db, mut redis_conn, _state) = setup().await;
+    let email = format!("race+{}@example.com", Uuid::new_v4());
+    let verifier = b64(b"verifier-race");
+    let kdf_salt = b64(&[7u8; 16]);
+
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email":email,"auth_verifier":verifier,"kdf_salt":kdf_salt}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, login) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email":email,"auth_verifier":verifier}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let refresh = login["refresh_token"].as_str().unwrap().to_string();
+
+    let mut app1 = app.clone();
+    let mut app2 = app.clone();
+    let r1 = refresh.clone();
+    let r2 = refresh.clone();
+    let (a, b) = tokio::join!(
+        request(
+            &mut app1,
+            json_req(Method::POST, "/auth/refresh", json!({"refresh_token": r1})),
+        ),
+        request(
+            &mut app2,
+            json_req(Method::POST, "/auth/refresh", json!({"refresh_token": r2})),
+        ),
+    );
+
+    let statuses = [a.0, b.0];
+    let ok_count = statuses.iter().filter(|s| **s == StatusCode::OK).count();
+    let unauthorized_count = statuses
+        .iter()
+        .filter(|s| **s == StatusCode::UNAUTHORIZED)
+        .count();
+    assert_eq!(
+        ok_count, 1,
+        "exactly one refresh should succeed: {statuses:?} {a:?} {b:?}"
+    );
+    assert_eq!(
+        unauthorized_count, 1,
+        "other concurrent refresh should be unauthorized: {statuses:?} {a:?} {b:?}"
+    );
+
+    // Old token must be rejected
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token": refresh}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Winning token should work
+    let winning_refresh = if a.0 == StatusCode::OK {
+        a.1["refresh_token"].as_str().unwrap().to_string()
+    } else {
+        b.1["refresh_token"].as_str().unwrap().to_string()
+    };
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token": winning_refresh}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    sqlx_cleanup(&db, &email).await;
+    redis_cleanup_login(&mut redis_conn, &email).await;
+}
+
+#[tokio::test]
+async fn login_does_not_persist_refresh_token_when_access_mint_fails() {
+    let (mut app, db, mut redis_conn, state) = setup().await;
+    let email = format!("mintfail+{}@example.com", Uuid::new_v4());
+    let verifier = b64(b"verifier-mintfail");
+    let kdf_salt = b64(&[8u8; 16]);
+
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email":email,"auth_verifier":verifier,"kdf_salt":kdf_salt}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let user = password_manager_backend::db::models::user::Entity::find()
+        .filter(password_manager_backend::db::models::user::Column::Email.eq(email.clone()))
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("user exists");
+
+    let _guard = password_manager_backend::app::routers::fail_access_mint_test_guard(&state);
+    let (status, body) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email":email,"auth_verifier":verifier}),
+        ),
+    )
+    .await;
+    drop(_guard);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let count = password_manager_backend::db::models::refresh_token::Entity::find()
+        .filter(password_manager_backend::db::models::refresh_token::Column::UserId.eq(user.id))
+        .all(&db)
+        .await
+        .unwrap()
+        .len();
+    assert_eq!(
+        count, 0,
+        "no refresh token should be persisted on mint failure"
+    );
+
+    sqlx_cleanup(&db, &email).await;
+    redis_cleanup_login(&mut redis_conn, &email).await;
+}
+
+#[tokio::test]
+async fn refresh_does_not_rotate_when_access_mint_fails() {
+    let (mut app, db, mut redis_conn, state) = setup().await;
+    let email = format!("refresh-mint-fail+{}@example.com", Uuid::new_v4());
+    let verifier = b64(b"verifier-refresh-mint");
+    let kdf_salt = b64(&[9u8; 16]);
+
+    let (status, _) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email":email,"auth_verifier":verifier,"kdf_salt":kdf_salt}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, login) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email":email,"auth_verifier":verifier}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let refresh = login["refresh_token"].as_str().unwrap().to_string();
+
+    let _guard = password_manager_backend::app::routers::fail_access_mint_test_guard(&state);
+    let (status, body) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token": refresh}),
+        ),
+    )
+    .await;
+    drop(_guard);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+
+    // Old refresh token must still be valid because mint failed before commit.
+    let (status, refreshed) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/refresh",
+            json!({"refresh_token": refresh}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "old token should remain valid after mint failure: {refreshed}"
+    );
+
+    sqlx_cleanup(&db, &email).await;
+    redis_cleanup_login(&mut redis_conn, &email).await;
 }

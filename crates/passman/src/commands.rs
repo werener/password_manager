@@ -43,23 +43,52 @@ fn load_session(paths: &config::Paths) -> CliResult<Session> {
         .ok_or_else(|| CliError::Message("not logged in; run `passman login`".into()))
 }
 
-async fn refresh_session(
-    api: &ApiClient,
-    paths: &config::Paths,
+fn apply_refresh_response(
     sess: &mut Session,
+    resp: password_manager_api_types::auth::AuthTokensResponse,
+    session_path: &std::path::Path,
 ) -> CliResult<()> {
-    let resp = api
-        .refresh(&password_manager_api_types::auth::RefreshRequest {
-            refresh_token: sess.refresh_token.clone(),
-        })
-        .await?;
+    if resp.kdf_salt != sess.kdf_salt {
+        return Err(CliError::Message(
+            "refresh protocol error: kdf_salt mismatch; run `passman login`".into(),
+        ));
+    }
     sess.access_token = resp.access_token;
     sess.refresh_token = resp.refresh_token;
     sess.access_expires_in_secs = resp.access_expires_in_secs;
     sess.refresh_expires_in_secs = resp.refresh_expires_in_secs;
-    sess.kdf_salt = resp.kdf_salt;
-    sess.save(&paths.session)?;
+    sess.save(session_path)?;
     Ok(())
+}
+
+async fn refresh_session_locked(
+    api: &ApiClient,
+    paths: &config::Paths,
+    sess: &mut Session,
+) -> CliResult<bool> {
+    let _lock = password_manager_client::storage::lock_exclusive(&paths.session)?;
+    let latest = load_session(paths)?;
+    if latest.access_token != sess.access_token || latest.refresh_token != sess.refresh_token {
+        *sess = latest;
+        return Ok(true);
+    }
+    let resp = api
+        .refresh(&password_manager_api_types::auth::RefreshRequest {
+            refresh_token: sess.refresh_token.clone(),
+        })
+        .await
+        .map_err(map_refresh_error)?;
+    apply_refresh_response(sess, resp, &paths.session)?;
+    Ok(false)
+}
+
+fn map_refresh_error(err: password_manager_client::error::ClientError) -> CliError {
+    match err {
+        password_manager_client::error::ClientError::Unauthorized(_) => {
+            CliError::Message("session expired; run `passman login`".into())
+        }
+        other => CliError::Client(other),
+    }
 }
 
 async fn with_auth_retry<T, F, Fut>(
@@ -75,9 +104,22 @@ where
     match f(sess.access_token.clone()).await {
         Ok(v) => Ok(v),
         Err(password_manager_client::error::ClientError::Unauthorized(_)) => {
-            refresh_session(api, paths, sess)
-                .await
-                .map_err(|_| CliError::Message("session expired; run `passman login`".into()))?;
+            let reloaded = refresh_session_locked(api, paths, sess).await?;
+            if reloaded {
+                return match f(sess.access_token.clone()).await {
+                    Ok(v) => Ok(v),
+                    Err(password_manager_client::error::ClientError::Unauthorized(_)) => {
+                        refresh_session_locked(api, paths, sess).await?;
+                        f(sess.access_token.clone()).await.map_err(|e| match e {
+                            password_manager_client::error::ClientError::Unauthorized(_) => {
+                                CliError::Message("session expired; run `passman login`".into())
+                            }
+                            other => CliError::Client(other),
+                        })
+                    }
+                    Err(e) => Err(CliError::Client(e)),
+                };
+            }
             f(sess.access_token.clone()).await.map_err(|e| match e {
                 password_manager_client::error::ClientError::Unauthorized(_) => {
                     CliError::Message("session expired; run `passman login`".into())
@@ -399,5 +441,68 @@ fn prompt_optional_update(value: String) -> Option<Option<String>> {
         Some(None)
     } else {
         Some(Some(trimmed.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use password_manager_api_types::auth::AuthTokensResponse;
+    use std::fs;
+
+    fn temp_session_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("passman-test-{name}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("session.json")
+    }
+
+    fn session() -> Session {
+        Session {
+            server_url: "http://localhost:3000".into(),
+            email: "user@example.com".into(),
+            access_token: "old-access".into(),
+            refresh_token: "old-refresh".into(),
+            access_expires_in_secs: 900,
+            refresh_expires_in_secs: 604800,
+            kdf_salt: "salt-a".into(),
+        }
+    }
+
+    fn refresh_resp(kdf_salt: &str) -> AuthTokensResponse {
+        AuthTokensResponse {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            token_type: "Bearer".into(),
+            access_expires_in_secs: 100,
+            refresh_expires_in_secs: 200,
+            kdf_salt: kdf_salt.into(),
+        }
+    }
+
+    #[test]
+    fn refresh_session_rejects_kdf_salt_mismatch() {
+        let path = temp_session_path("kdf-mismatch");
+        let mut sess = session();
+        sess.save(&path).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+
+        let err = apply_refresh_response(&mut sess, refresh_resp("salt-b"), &path).unwrap_err();
+        assert!(format!("{err}").contains("kdf_salt mismatch"), "{err}");
+        assert_eq!(sess.access_token, "old-access");
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn refresh_session_updates_tokens_when_kdf_salt_matches() {
+        let path = temp_session_path("kdf-ok");
+        let mut sess = session();
+        sess.save(&path).unwrap();
+
+        apply_refresh_response(&mut sess, refresh_resp("salt-a"), &path).unwrap();
+        assert_eq!(sess.access_token, "new-access");
+        assert_eq!(sess.refresh_token, "new-refresh");
+        assert_eq!(sess.kdf_salt, "salt-a");
+        let loaded = Session::load(&path).unwrap().unwrap();
+        assert_eq!(loaded.access_token, "new-access");
     }
 }

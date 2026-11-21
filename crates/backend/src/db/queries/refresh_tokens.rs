@@ -1,7 +1,7 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set,
+    TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -41,6 +41,18 @@ pub async fn find_by_hash(
         .await?)
 }
 
+pub async fn peek_active_by_hash(
+    db: &DatabaseConnection,
+    token_hash: &[u8],
+) -> AppResult<Option<refresh_token::Model>> {
+    let now = Utc::now().fixed_offset();
+    Ok(refresh_token::Entity::find()
+        .filter(refresh_token::Column::TokenHash.eq(token_hash.to_vec()))
+        .filter(refresh_token::Column::ExpiresAt.gt(now))
+        .one(db)
+        .await?)
+}
+
 pub async fn delete_by_id(db: &DatabaseConnection, id: Uuid) -> AppResult<()> {
     refresh_token::Entity::delete_by_id(id).exec(db).await?;
     Ok(())
@@ -54,25 +66,65 @@ pub async fn delete_by_hash(db: &DatabaseConnection, token_hash: &[u8]) -> AppRe
     Ok(())
 }
 
-/// Rotates a refresh token in a transaction: delete old, insert new.
-pub async fn rotate(
+pub struct RefreshRotation {
+    pub old: refresh_token::Model,
+}
+
+pub struct RotatedRefreshInput {
+    pub id: Uuid,
+    pub token_hash: Vec<u8>,
+    pub expires_at: DateTime<FixedOffset>,
+    pub created_at: DateTime<FixedOffset>,
+}
+
+/// Atomically rotate a refresh token: lock active row, delete old, insert new.
+/// Returns `Ok(None)` if token is missing, expired, or already consumed.
+pub async fn rotate_by_hash(
     db: &DatabaseConnection,
-    old_id: Uuid,
-    new_token: NewRefreshToken,
-) -> AppResult<refresh_token::Model> {
-    let txn: DatabaseTransaction = db.begin().await?;
-    refresh_token::Entity::delete_by_id(old_id)
+    token_hash: &[u8],
+    new_token: RotatedRefreshInput,
+) -> AppResult<Option<RefreshRotation>> {
+    let txn = db.begin().await?;
+    let now = Utc::now().fixed_offset();
+
+    let found = refresh_token::Entity::find()
+        .filter(refresh_token::Column::TokenHash.eq(token_hash.to_vec()))
+        .lock_exclusive()
+        .one(&txn)
+        .await?;
+
+    let Some(found) = found else {
+        txn.rollback().await?;
+        return Ok(None);
+    };
+
+    if found.expires_at <= now {
+        refresh_token::Entity::delete_by_id(found.id)
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        return Ok(None);
+    }
+
+    let deleted = refresh_token::Entity::delete_many()
+        .filter(refresh_token::Column::Id.eq(found.id))
+        .filter(refresh_token::Column::TokenHash.eq(token_hash.to_vec()))
         .exec(&txn)
         .await?;
+    if deleted.rows_affected != 1 {
+        txn.rollback().await?;
+        return Ok(None);
+    }
+
     let model = refresh_token::ActiveModel {
         id: Set(new_token.id),
-        user_id: Set(new_token.user_id),
-        session_id: Set(new_token.session_id),
+        user_id: Set(found.user_id),
+        session_id: Set(found.session_id),
         token_hash: Set(new_token.token_hash),
         expires_at: Set(new_token.expires_at),
         created_at: Set(new_token.created_at),
     };
-    let inserted = model.insert(&txn).await?;
+    model.insert(&txn).await?;
     txn.commit().await?;
-    Ok(inserted)
+    Ok(Some(RefreshRotation { old: found }))
 }

@@ -125,22 +125,7 @@ async fn refresh(
     Json(payload): Json<RefreshRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
     let input = RefreshInput::try_from(payload)?;
-
     let token_hash = hash_refresh_token(&input.refresh_token);
-    let now = Utc::now().fixed_offset();
-
-    let found = refresh_tokens::find_by_hash(&state.db, &token_hash)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-
-    if found.expires_at <= now {
-        let _ = refresh_tokens::delete_by_id(&state.db, found.id).await;
-        return Err(AppError::Unauthorized);
-    }
-
-    let user = users::find_by_id(&state.db, found.user_id)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
 
     let new_refresh_token = generate_refresh_token();
     let new_hash = hash_refresh_token(&new_refresh_token);
@@ -150,26 +135,29 @@ async fn refresh(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
-    refresh_tokens::rotate(
+    let found = refresh_tokens::peek_active_by_hash(&state.db, &token_hash)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    let user = users::find_by_id(&state.db, found.user_id)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    let access_token = mint_access_token(&state, found.user_id, found.session_id)?;
+
+    let rotated = refresh_tokens::rotate_by_hash(
         &state.db,
-        found.id,
-        refresh_tokens::NewRefreshToken {
+        &token_hash,
+        refresh_tokens::RotatedRefreshInput {
             id: new_id,
-            user_id: found.user_id,
-            session_id: found.session_id,
             token_hash: new_hash,
             expires_at,
             created_at: Utc::now().fixed_offset(),
         },
     )
-    .await?;
-
-    let access_token = create_access_token(
-        &state.config.jwt_secret,
-        found.user_id,
-        found.session_id,
-        state.config.access_token_ttl,
-    )?;
+    .await?
+    .ok_or(AppError::Unauthorized)?;
+    let _found = rotated.old;
 
     Ok(Json(AuthTokensResponse {
         access_token,
@@ -199,6 +187,41 @@ fn fake_kdf_salt(secret: &str, email_normalized: &str) -> Vec<u8> {
     hasher.finalize()[..16].to_vec()
 }
 
+pub struct FailAccessMintGuard {
+    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for FailAccessMintGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[doc(hidden)]
+pub fn fail_access_mint_test_guard(state: &AppState) -> FailAccessMintGuard {
+    state
+        .fail_access_mint
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    FailAccessMintGuard {
+        flag: state.fail_access_mint.clone(),
+    }
+}
+
+fn mint_access_token(state: &AppState, user_id: Uuid, session_id: Uuid) -> AppResult<String> {
+    if state
+        .fail_access_mint
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err(AppError::Internal);
+    }
+    create_access_token(
+        &state.config.jwt_secret,
+        user_id,
+        session_id,
+        state.config.access_token_ttl,
+    )
+}
+
 async fn issue_tokens(
     state: &AppState,
     user_id: Uuid,
@@ -212,6 +235,8 @@ async fn issue_tokens(
             .map_err(|_| AppError::Internal)?)
     .fixed_offset();
 
+    let access_token = mint_access_token(state, user_id, session_id)?;
+
     refresh_tokens::create(
         &state.db,
         refresh_tokens::NewRefreshToken {
@@ -224,13 +249,6 @@ async fn issue_tokens(
         },
     )
     .await?;
-
-    let access_token = create_access_token(
-        &state.config.jwt_secret,
-        user_id,
-        session_id,
-        state.config.access_token_ttl,
-    )?;
 
     Ok(Json(AuthTokensResponse {
         access_token,

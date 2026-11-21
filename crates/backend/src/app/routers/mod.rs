@@ -1,4 +1,5 @@
 pub mod auth;
+pub use auth::fail_access_mint_test_guard;
 pub mod credentials;
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
