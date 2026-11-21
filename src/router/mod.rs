@@ -1,3 +1,6 @@
+pub mod auth;
+pub mod credentials;
+
 use axum::{Router, routing::get};
 
 use crate::state::AppState;
@@ -10,7 +13,7 @@ async fn health() -> &'static str {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .nest("/auth", crate::auth::router())
-        .nest("/credentials", crate::credentials::router())
+        .nest("/auth", auth::router())
+        .nest("/credentials", credentials::router())
         .with_state(state)
 }
