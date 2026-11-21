@@ -174,7 +174,7 @@ async fn refresh(
     Ok(Json(AuthTokensResponse {
         access_token,
         refresh_token: new_refresh_token,
-        token_type: "Bearer",
+        token_type: "Bearer".to_string(),
         access_expires_in_secs: state.config.access_token_ttl.as_secs(),
         refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
         kdf_salt: encode_base64(&user.kdf_salt),
@@ -235,7 +235,7 @@ async fn issue_tokens(
     Ok(Json(AuthTokensResponse {
         access_token,
         refresh_token,
-        token_type: "Bearer",
+        token_type: "Bearer".to_string(),
         access_expires_in_secs: state.config.access_token_ttl.as_secs(),
         refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
         kdf_salt: encode_base64(kdf_salt),

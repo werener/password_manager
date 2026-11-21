@@ -1,9 +1,9 @@
+use crate::app::dto::ApiErrorBody;
 use axum::{
     Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
 
 /// Application error type mapped to HTTP responses.
 #[derive(Debug, thiserror::Error)]
@@ -41,14 +41,6 @@ pub enum ConfigError {
 
     #[error("invalid environment variable {name}: {message}")]
     Invalid { name: &'static str, message: String },
-}
-
-#[derive(Serialize)]
-struct ErrorBody {
-    code: &'static str,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<serde_json::Value>,
 }
 
 impl IntoResponse for AppError {
@@ -100,8 +92,8 @@ impl IntoResponse for AppError {
             tracing::error!(error = ?self, "request failed");
         }
 
-        let body = ErrorBody {
-            code,
+        let body = ApiErrorBody {
+            code: code.to_string(),
             message,
             details: None,
         };
