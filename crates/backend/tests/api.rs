@@ -7,7 +7,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
 use migration::{Migrator, MigratorTrait};
-use password_manager::{app, config::Config};
+use password_manager_backend::{app, config::Config};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use serde_json::{Value, json};
@@ -451,12 +451,12 @@ async fn credentials_security_and_validation() {
 
 async fn sqlx_cleanup(db: &DatabaseConnection, email: &str) {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    if let Ok(Some(u)) = password_manager::db::models::user::Entity::find()
-        .filter(password_manager::db::models::user::Column::Email.eq(email))
+    if let Ok(Some(u)) = password_manager_backend::db::models::user::Entity::find()
+        .filter(password_manager_backend::db::models::user::Column::Email.eq(email))
         .one(db)
         .await
     {
-        let _ = password_manager::db::models::user::Entity::delete_by_id(u.id)
+        let _ = password_manager_backend::db::models::user::Entity::delete_by_id(u.id)
             .exec(db)
             .await;
     }

@@ -4,11 +4,9 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-COPY migration/Cargo.toml migration/Cargo.toml
-COPY src src
-COPY migration/src migration/src
+COPY crates crates
 
-RUN cargo build --release -p password_manager
+RUN cargo build --release -p password_manager_backend
 
 FROM debian:bookworm-slim
 RUN apt-get update \
@@ -16,8 +14,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/password_manager /usr/local/bin/password_manager
+COPY --from=builder /app/target/release/password_manager_backend /usr/local/bin/password_manager_backend
 
 EXPOSE 3000
 
-CMD ["password_manager"]
+CMD ["password_manager_backend"]

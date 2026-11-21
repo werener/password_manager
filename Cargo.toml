@@ -1,33 +1,9 @@
 [workspace]
-members = [".", "migration"]
+members = [
+    "crates/backend",
+    "crates/api-types",
+    "crates/client",
+    "crates/cli",
+    "crates/migration",
+]
 resolver = "2"
-
-[package]
-name = "password_manager"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-migration = { path = "migration" }
-axum = "0.7"
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
-sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net"] }
-dotenvy = "0.15"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-thiserror = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde", "clock"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-base64 = "0.22"
-argon2 = "0.5"
-jsonwebtoken = "9"
-rand = "0.8"
-sha2 = "0.10"
-
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
-

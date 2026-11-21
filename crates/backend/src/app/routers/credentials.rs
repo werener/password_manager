@@ -2,7 +2,7 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete as route_delete, get as route_get, post as route_post, put as route_put},
+    routing::get as route_get,
 };
 use chrono::Utc;
 use sea_orm::Set;

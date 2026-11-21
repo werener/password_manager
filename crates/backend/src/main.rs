@@ -1,4 +1,4 @@
-use password_manager::{app, config::Config};
+use password_manager_backend::{app, config::Config};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "info,password_manager=debug,sea_orm_migration=info,tower_http=debug".into()
+                "info,password_manager_backend=debug,sea_orm_migration=info,tower_http=debug".into()
             }),
         )
         .with(tracing_subscriber::fmt::layer())

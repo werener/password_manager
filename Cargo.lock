@@ -1486,7 +1486,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "password_manager"
+name = "password_manager_api_types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "password_manager_backend"
 version = "0.1.0"
 dependencies = [
  "argon2",
@@ -1509,6 +1517,23 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "password_manager_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "password_manager_client",
+ "tokio",
+]
+
+[[package]]
+name = "password_manager_client"
+version = "0.1.0"
+dependencies = [
+ "password_manager_api_types",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
