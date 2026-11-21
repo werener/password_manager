@@ -32,7 +32,7 @@ pub fn router() -> Router<AppState> {
 async fn create(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
-    IdempotencyKey(idempotency_key): IdempotencyKey,
+    idempotency_key: IdempotencyKey,
     Json(payload): Json<CreateCredentialRequest>,
 ) -> AppResult<(StatusCode, Json<CredentialResponse>)> {
     let input = CreateCredentialInput::try_new(idempotency_key, payload)?;

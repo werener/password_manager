@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::app::validation::double_option;
+use super::serde::double_option;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateCredentialRequest {

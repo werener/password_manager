@@ -1,12 +1,14 @@
 use crate::{
-    app::dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest},
+    app::{
+        dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest},
+        extractors::IdempotencyKey,
+    },
     crypto::decode_base64,
     error::{AppError, AppResult},
 };
 
-use super::{
-    validate_credential_metadata, validate_idempotency_key, validate_opt_text, validate_secret,
-    validate_text,
+use super::rules::{
+    validate_credential_metadata, validate_opt_text, validate_secret, validate_text,
 };
 
 pub struct CreateCredentialInput {
@@ -20,21 +22,23 @@ pub struct CreateCredentialInput {
 }
 
 impl CreateCredentialInput {
-    pub fn try_new(idempotency_key: String, payload: CreateCredentialRequest) -> AppResult<Self> {
+    pub fn try_new(
+        idempotency_key: IdempotencyKey,
+        payload: CreateCredentialRequest,
+    ) -> AppResult<Self> {
         validate_credential_metadata(
             &payload.name,
             &payload.username,
             &payload.url,
             &payload.notes,
         )?;
-        validate_idempotency_key(&idempotency_key)?;
         let password_ciphertext =
             decode_base64("password_ciphertext", &payload.password_ciphertext)?;
         let password_nonce = decode_base64("password_nonce", &payload.password_nonce)?;
         validate_secret(&password_ciphertext, &password_nonce)?;
 
         Ok(Self {
-            idempotency_key,
+            idempotency_key: idempotency_key.0,
             name: payload.name.trim().to_string(),
             username: payload.username.map(|v| v.trim().to_string()),
             url: payload.url,

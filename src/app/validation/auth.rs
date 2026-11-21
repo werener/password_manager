@@ -6,7 +6,7 @@ use crate::{
     error::AppError,
 };
 
-use super::validate_len;
+use super::rules::validate_len;
 
 pub struct RegisterInput {
     pub email: String,
