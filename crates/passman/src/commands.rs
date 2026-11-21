@@ -16,6 +16,28 @@ fn get_server(cfg: &config::Config) -> CliResult<String> {
         .ok_or_else(|| CliError::Message("server URL not set; run `passman server <url>`".into()))
 }
 
+fn resolve_email(email: Option<String>) -> CliResult<String> {
+    let raw = prompt::resolve_line(email, "Email: ")?;
+    let email = crypto::normalize_email(&raw);
+    if email.is_empty() {
+        return Err(CliError::Message("email cannot be empty".into()));
+    }
+    if !email.contains('@') || email.starts_with('@') || email.ends_with('@') {
+        return Err(CliError::Message("invalid email".into()));
+    }
+    Ok(email)
+}
+
+fn resolve_master_for_register(master_password: Option<String>) -> CliResult<String> {
+    if let Some(pw) = master_password {
+        if pw.is_empty() {
+            return Err(CliError::Message("password cannot be empty".into()));
+        }
+        return Ok(pw);
+    }
+    prompt::prompt_password_confirm()
+}
+
 fn load_session(paths: &config::Paths) -> CliResult<Session> {
     Session::load(&paths.session)?
         .ok_or_else(|| CliError::Message("not logged in; run `passman login`".into()))
@@ -67,15 +89,15 @@ where
     }
 }
 
-pub async fn register(paths: &config::Paths) -> CliResult<()> {
+pub async fn register(
+    paths: &config::Paths,
+    email: Option<String>,
+    master_password: Option<String>,
+) -> CliResult<()> {
     let cfg = config::Config::load(&paths.config)?;
     let server = get_server(&cfg)?;
-    let email_raw = prompt::prompt_line("Email: ")?;
-    let email = crypto::normalize_email(&email_raw);
-    if email.is_empty() {
-        return Err(CliError::Message("email cannot be empty".into()));
-    }
-    let password = prompt::prompt_password_confirm()?;
+    let email = resolve_email(email)?;
+    let password = resolve_master_for_register(master_password)?;
 
     let salt = crypto::generate_kdf_salt();
     let master = crypto::derive_master_key(&password, &salt)?;
@@ -93,12 +115,15 @@ pub async fn register(paths: &config::Paths) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn login(paths: &config::Paths) -> CliResult<()> {
+pub async fn login(
+    paths: &config::Paths,
+    email: Option<String>,
+    master_password: Option<String>,
+) -> CliResult<()> {
     let cfg = config::Config::load(&paths.config)?;
     let server = get_server(&cfg)?;
-    let email_raw = prompt::prompt_line("Email: ")?;
-    let email = crypto::normalize_email(&email_raw);
-    let password = prompt::prompt_password("Master password: ")?;
+    let email = resolve_email(email)?;
+    let password = prompt::resolve_password(master_password, "Master password: ")?;
 
     let api = ApiClient::new(server.clone())?;
     let pre = api
@@ -167,27 +192,35 @@ fn derive_vault_key_for_session(
     Ok(vault)
 }
 
-pub async fn add(paths: &config::Paths) -> CliResult<()> {
+pub async fn add(
+    paths: &config::Paths,
+    name: Option<String>,
+    username: Option<String>,
+    url: Option<String>,
+    notes: Option<String>,
+    secret: Option<String>,
+    master_password: Option<String>,
+) -> CliResult<()> {
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::prompt_password("Master password: ")?;
+    let password = prompt::resolve_password(master_password, "Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
-    let name = prompt::prompt_line("Name: ")?;
+    let name = prompt::resolve_line(name, "Name: ")?;
     if name.trim().is_empty() {
         return Err(CliError::Message("name cannot be empty".into()));
     }
-    let username = prompt::prompt_line("Username (optional): ")?;
-    let url = prompt::prompt_line("URL (optional): ")?;
-    let notes = prompt::prompt_line("Notes (optional): ")?;
-    let secret = prompt::prompt_password("Credential secret: ")?;
+    let username = resolve_optional_field(username, "Username (optional): ")?;
+    let url = resolve_optional_field(url, "URL (optional): ")?;
+    let notes = resolve_optional_field(notes, "Notes (optional): ")?;
+    let secret = prompt::resolve_password(secret, "Credential secret: ")?;
 
     let (ciphertext, nonce) = crypto::encrypt_secret(&vault, &sess.email, &secret)?;
     let req = CreateCredentialRequest {
         name: name.trim().to_string(),
-        username: empty_to_none(username),
-        url: empty_to_none(url),
-        notes: empty_to_none(notes),
+        username,
+        url,
+        notes,
         password_ciphertext: ciphertext,
         password_nonce: nonce,
     };
@@ -229,11 +262,16 @@ pub async fn list(paths: &config::Paths) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn get(paths: &config::Paths, id: &str) -> CliResult<()> {
-    let id = Uuid::parse_str(id).map_err(|_| CliError::InvalidId(id.to_string()))?;
+pub async fn get(
+    paths: &config::Paths,
+    id: Option<String>,
+    master_password: Option<String>,
+) -> CliResult<()> {
+    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
+    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::prompt_password("Master password: ")?;
+    let password = prompt::resolve_password(master_password, "Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
@@ -257,11 +295,16 @@ pub async fn get(paths: &config::Paths, id: &str) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn edit(paths: &config::Paths, id: &str) -> CliResult<()> {
-    let id = Uuid::parse_str(id).map_err(|_| CliError::InvalidId(id.to_string()))?;
+pub async fn edit(
+    paths: &config::Paths,
+    id: Option<String>,
+    master_password: Option<String>,
+) -> CliResult<()> {
+    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
+    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::prompt_password("Master password: ")?;
+    let password = prompt::resolve_password(master_password, "Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
@@ -310,8 +353,9 @@ pub async fn edit(paths: &config::Paths, id: &str) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn delete(paths: &config::Paths, id: &str) -> CliResult<()> {
-    let id = Uuid::parse_str(id).map_err(|_| CliError::InvalidId(id.to_string()))?;
+pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
+    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
+    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
 
@@ -337,6 +381,13 @@ fn empty_to_none(value: String) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn resolve_optional_field(value: Option<String>, label: &str) -> CliResult<Option<String>> {
+    match value {
+        Some(v) => Ok(empty_to_none(v)),
+        None => Ok(empty_to_none(prompt::prompt_line(label)?)),
     }
 }
 

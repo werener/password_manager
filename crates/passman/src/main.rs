@@ -6,7 +6,12 @@ use clap::{Parser, Subcommand};
 use password_manager_client::{config, session};
 
 #[derive(Parser)]
-#[command(name = "passman", version, about = "Password manager CLI", disable_version_flag = true)]
+#[command(
+    name = "passman",
+    version,
+    about = "Password manager CLI",
+    disable_version_flag = true
+)]
 struct Cli {
     #[arg(short = 'v', short_alias = 'V', long = "version", action = clap::ArgAction::Version)]
     version: Option<bool>,
@@ -18,25 +23,74 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Set backend server URL
-    Server { url: String },
+    Server {
+        /// Server URL, e.g. http://localhost:3000
+        url: Option<String>,
+    },
     /// Show current configuration and session status
     Config,
     /// Register a new account
-    Register,
+    Register {
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(
+            long = "master",
+            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
+        )]
+        master_password: Option<String>,
+    },
     /// Login to an account
-    Login,
+    Login {
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(
+            long = "master",
+            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
+        )]
+        master_password: Option<String>,
+    },
     /// Logout from current account
     Logout,
     /// Add a credential
-    Add,
+    Add {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        username: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long = "secret")]
+        secret: Option<String>,
+        #[arg(
+            long = "master",
+            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
+        )]
+        master_password: Option<String>,
+    },
     /// List credentials
     List,
     /// Get a credential by id
-    Get { id: String },
+    Get {
+        id: Option<String>,
+        #[arg(
+            long = "master",
+            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
+        )]
+        master_password: Option<String>,
+    },
     /// Edit a credential by id
-    Edit { id: String },
+    Edit {
+        id: Option<String>,
+        #[arg(
+            long = "master",
+            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
+        )]
+        master_password: Option<String>,
+    },
     /// Delete a credential by id
-    Delete { id: String },
+    Delete { id: Option<String> },
 }
 
 #[tokio::main]
@@ -53,6 +107,7 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
 
     match cli.command {
         Command::Server { url } => {
+            let url = prompt::resolve_line(url, "Server URL: ")?;
             let url = url.trim().trim_end_matches('/').to_string();
             if url.is_empty() {
                 return Err(error::CliError::Message(
@@ -84,14 +139,33 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 }
             }
         }
-        Command::Register => commands::register(&paths).await?,
-        Command::Login => commands::login(&paths).await?,
+        Command::Register {
+            email,
+            master_password,
+        } => commands::register(&paths, email, master_password).await?,
+        Command::Login {
+            email,
+            master_password,
+        } => commands::login(&paths, email, master_password).await?,
         Command::Logout => commands::logout(&paths).await?,
-        Command::Add => commands::add(&paths).await?,
+        Command::Add {
+            name,
+            username,
+            url,
+            notes,
+            secret,
+            master_password,
+        } => commands::add(&paths, name, username, url, notes, secret, master_password).await?,
         Command::List => commands::list(&paths).await?,
-        Command::Get { id } => commands::get(&paths, &id).await?,
-        Command::Edit { id } => commands::edit(&paths, &id).await?,
-        Command::Delete { id } => commands::delete(&paths, &id).await?,
+        Command::Get {
+            id,
+            master_password,
+        } => commands::get(&paths, id, master_password).await?,
+        Command::Edit {
+            id,
+            master_password,
+        } => commands::edit(&paths, id, master_password).await?,
+        Command::Delete { id } => commands::delete(&paths, id).await?,
     }
 
     Ok(())
