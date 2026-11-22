@@ -33,21 +33,11 @@ enum Command {
     Register {
         #[arg(long)]
         email: Option<String>,
-        #[arg(
-            long = "master",
-            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
-        )]
-        master_password: Option<String>,
     },
     /// Login to an account
     Login {
         #[arg(long)]
         email: Option<String>,
-        #[arg(
-            long = "master",
-            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
-        )]
-        master_password: Option<String>,
     },
     /// Logout from current account
     Logout,
@@ -63,31 +53,16 @@ enum Command {
         notes: Option<String>,
         #[arg(long = "secret")]
         secret: Option<String>,
-        #[arg(
-            long = "master",
-            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
-        )]
-        master_password: Option<String>,
     },
     /// List credentials
     List,
     /// Get a credential by id
     Get {
         id: Option<String>,
-        #[arg(
-            long = "master",
-            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
-        )]
-        master_password: Option<String>,
     },
     /// Edit a credential by id
     Edit {
         id: Option<String>,
-        #[arg(
-            long = "master",
-            help = "Master password (discouraged: visible in shell history/process list; prefer interactive prompt)"
-        )]
-        master_password: Option<String>,
     },
     /// Delete a credential by id
     Delete { id: Option<String> },
@@ -107,16 +82,7 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
 
     match cli.command {
         Command::Server { url } => {
-            let url = prompt::resolve_line(url, "Server URL: ")?;
-            let url = url.trim().trim_end_matches('/').to_string();
-            if url.is_empty() {
-                return Err(error::CliError::Message(
-                    "server URL cannot be empty".into(),
-                ));
-            }
-            let mut cfg = config::Config::load(&paths.config)?;
-            cfg.server_url = Some(url.clone());
-            cfg.save(&paths.config)?;
+            let url = commands::server(&paths, url)?;
             println!("server URL set to {url}");
         }
         Command::Config => {
@@ -139,14 +105,8 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 }
             }
         }
-        Command::Register {
-            email,
-            master_password,
-        } => commands::register(&paths, email, master_password).await?,
-        Command::Login {
-            email,
-            master_password,
-        } => commands::login(&paths, email, master_password).await?,
+        Command::Register { email } => commands::register(&paths, email).await?,
+        Command::Login { email } => commands::login(&paths, email).await?,
         Command::Logout => commands::logout(&paths).await?,
         Command::Add {
             name,
@@ -154,17 +114,10 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
             url,
             notes,
             secret,
-            master_password,
-        } => commands::add(&paths, name, username, url, notes, secret, master_password).await?,
+        } => commands::add(&paths, name, username, url, notes, secret).await?,
         Command::List => commands::list(&paths).await?,
-        Command::Get {
-            id,
-            master_password,
-        } => commands::get(&paths, id, master_password).await?,
-        Command::Edit {
-            id,
-            master_password,
-        } => commands::edit(&paths, id, master_password).await?,
+        Command::Get { id } => commands::get(&paths, id).await?,
+        Command::Edit { id } => commands::edit(&paths, id).await?,
         Command::Delete { id } => commands::delete(&paths, id).await?,
     }
 

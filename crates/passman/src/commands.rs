@@ -28,13 +28,7 @@ fn resolve_email(email: Option<String>) -> CliResult<String> {
     Ok(email)
 }
 
-fn resolve_master_for_register(master_password: Option<String>) -> CliResult<String> {
-    if let Some(pw) = master_password {
-        if pw.is_empty() {
-            return Err(CliError::Message("password cannot be empty".into()));
-        }
-        return Ok(pw);
-    }
+fn resolve_master_for_register() -> CliResult<String> {
     prompt::prompt_password_confirm()
 }
 
@@ -134,12 +128,11 @@ where
 pub async fn register(
     paths: &config::Paths,
     email: Option<String>,
-    master_password: Option<String>,
 ) -> CliResult<()> {
     let cfg = config::Config::load(&paths.config)?;
     let server = get_server(&cfg)?;
     let email = resolve_email(email)?;
-    let password = resolve_master_for_register(master_password)?;
+    let password = resolve_master_for_register()?;
 
     let salt = crypto::generate_kdf_salt();
     let master = crypto::derive_master_key(&password, &salt)?;
@@ -157,15 +150,11 @@ pub async fn register(
     Ok(())
 }
 
-pub async fn login(
-    paths: &config::Paths,
-    email: Option<String>,
-    master_password: Option<String>,
-) -> CliResult<()> {
+pub async fn login(paths: &config::Paths, email: Option<String>) -> CliResult<()> {
     let cfg = config::Config::load(&paths.config)?;
     let server = get_server(&cfg)?;
     let email = resolve_email(email)?;
-    let password = prompt::resolve_password(master_password, "Master password: ")?;
+    let password = prompt::prompt_password("Master password: ")?;
 
     let api = ApiClient::new(server.clone())?;
     let pre = api
@@ -241,11 +230,10 @@ pub async fn add(
     url: Option<String>,
     notes: Option<String>,
     secret: Option<String>,
-    master_password: Option<String>,
 ) -> CliResult<()> {
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::resolve_password(master_password, "Master password: ")?;
+    let password = prompt::prompt_password("Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
     let name = prompt::resolve_line(name, "Name: ")?;
@@ -304,16 +292,12 @@ pub async fn list(paths: &config::Paths) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn get(
-    paths: &config::Paths,
-    id: Option<String>,
-    master_password: Option<String>,
-) -> CliResult<()> {
+pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id_raw = prompt::resolve_line(id, "Credential id: ")?;
     let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::resolve_password(master_password, "Master password: ")?;
+    let password = prompt::prompt_password("Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
@@ -337,16 +321,12 @@ pub async fn get(
     Ok(())
 }
 
-pub async fn edit(
-    paths: &config::Paths,
-    id: Option<String>,
-    master_password: Option<String>,
-) -> CliResult<()> {
+pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id_raw = prompt::resolve_line(id, "Credential id: ")?;
     let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
-    let password = prompt::resolve_password(master_password, "Master password: ")?;
+    let password = prompt::prompt_password("Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
@@ -504,5 +484,69 @@ mod tests {
         assert_eq!(sess.kdf_salt, "salt-a");
         let loaded = Session::load(&path).unwrap().unwrap();
         assert_eq!(loaded.access_token, "new-access");
+    }
+}
+
+pub fn server(paths: &config::Paths, url: Option<String>) -> CliResult<String> {
+    let url = prompt::resolve_line(url, "Server URL: ")?;
+    let url = url.trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return Err(CliError::Message("server URL cannot be empty".into()));
+    }
+    let mut cfg = config::Config::load(&paths.config)?;
+    let changed = cfg.server_url.as_deref() != Some(url.as_str());
+    cfg.server_url = Some(url.clone());
+    cfg.save(&paths.config)?;
+
+    if changed {
+        if let Some(mut sess) = Session::load(&paths.session)? {
+            sess.server_url = url.clone();
+            sess.save(&paths.session)?;
+        }
+    }
+    Ok(url)
+}
+
+#[cfg(test)]
+mod server_tests {
+    use super::*;
+    use std::fs;
+
+    fn test_paths(name: &str) -> config::Paths {
+        let dir = std::env::temp_dir().join(format!("passman-server-{name}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        config::Paths {
+            dir: dir.clone(),
+            config: dir.join("config.toml"),
+            session: dir.join("session.json"),
+        }
+    }
+
+    fn session() -> Session {
+        Session {
+            server_url: "http://localhost:3000".into(),
+            email: "user@example.com".into(),
+            access_token: "old-access".into(),
+            refresh_token: "old-refresh".into(),
+            access_expires_in_secs: 900,
+            refresh_expires_in_secs: 604800,
+            kdf_salt: "salt-a".into(),
+        }
+    }
+
+    #[test]
+    fn server_updates_active_session_url() {
+        let paths = test_paths("updates-session");
+        let mut cfg = config::Config::default();
+        cfg.server_url = Some("http://old".into());
+        cfg.save(&paths.config).unwrap();
+        let mut sess = session();
+        sess.server_url = "http://old".into();
+        sess.save(&paths.session).unwrap();
+
+        let url = server(&paths, Some("http://new".into())).unwrap();
+        assert_eq!(url, "http://new");
+        let sess = Session::load(&paths.session).unwrap().unwrap();
+        assert_eq!(sess.server_url, "http://new");
     }
 }
