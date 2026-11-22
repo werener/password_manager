@@ -1,4 +1,26 @@
+use password_manager_crypto::core;
+
 use crate::error::{AppError, AppResult};
+
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+pub fn validate_email(email: &str) -> AppResult<()> {
+    let ok = email.contains('@')
+        && !email.starts_with('@')
+        && !email.ends_with('@')
+        && email.len() <= 320;
+    if !ok {
+        return Err(AppError::BadRequest("invalid email".to_string()));
+    }
+    Ok(())
+}
+
+pub fn decode_base64_field(field: &'static str, value: &str) -> AppResult<Vec<u8>> {
+    core::base64::decode(value)
+        .map_err(|_| AppError::BadRequest(format!("{field} must be valid base64")))
+}
 
 pub fn validate_text(field: &'static str, value: &str, min: usize, max: usize) -> AppResult<()> {
     if value.chars().any(|c| c.is_control()) {

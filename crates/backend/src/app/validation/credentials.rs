@@ -1,14 +1,13 @@
 use password_manager_dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest};
 
-use password_manager_crypto::core;
-
 use crate::{
     app::extractors::IdempotencyKey,
     error::{AppError, AppResult},
 };
 
 use super::rules::{
-    validate_credential_metadata, validate_opt_text, validate_secret, validate_text,
+    decode_base64_field, validate_credential_metadata, validate_opt_text, validate_secret,
+    validate_text,
 };
 
 pub struct CreateCredentialInput {
@@ -33,11 +32,8 @@ impl CreateCredentialInput {
             &payload.notes,
         )?;
         let password_ciphertext =
-            core::base64::decode(&payload.password_ciphertext).map_err(|_| {
-                AppError::BadRequest("password_ciphertext must be valid base64".to_string())
-            })?;
-        let password_nonce = core::base64::decode(&payload.password_nonce)
-            .map_err(|_| AppError::BadRequest("password_nonce must be valid base64".to_string()))?;
+            decode_base64_field("password_ciphertext", &payload.password_ciphertext)?;
+        let password_nonce = decode_base64_field("password_nonce", &payload.password_nonce)?;
         validate_secret(&password_ciphertext, &password_nonce)?;
 
         Ok(Self {
@@ -89,12 +85,8 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
             payload.password_nonce.as_ref(),
         ) {
             (Some(Some(ct)), Some(Some(nonce))) => {
-                let ciphertext = core::base64::decode(ct).map_err(|_| {
-                    AppError::BadRequest("password_ciphertext must be valid base64".to_string())
-                })?;
-                let nonce_bytes = core::base64::decode(nonce).map_err(|_| {
-                    AppError::BadRequest("password_nonce must be valid base64".to_string())
-                })?;
+                let ciphertext = decode_base64_field("password_ciphertext", ct)?;
+                let nonce_bytes = decode_base64_field("password_nonce", nonce)?;
                 validate_secret(&ciphertext, &nonce_bytes)?;
                 Some(SecretBytes {
                     ciphertext,
