@@ -10,9 +10,9 @@ use crate::cli::{
     error::{CliError, CliResult},
     prompt,
     utils::{
-        derive_vault_key_for_session, get_server, load_session, prompt_line_with_current,
-        prompt_optional_update, resolve_email, resolve_master_for_register, resolve_optional_field,
-        sanitize_terminal, with_auth_retry,
+        derive_vault_key_for_session, edited_optional, get_server, load_session, prompt_prefilled,
+        resolve_email, resolve_master_for_register, resolve_optional_field, sanitize_terminal,
+        with_auth_retry,
     },
 };
 
@@ -221,6 +221,15 @@ pub async fn list(paths: &config::Paths, show_ids: bool) -> CliResult<()> {
     Ok(())
 }
 
+fn map_credential_not_found(id: &str, err: CliError) -> CliError {
+    match err {
+        CliError::Client(crate::client::error::ClientError::NotFound(_)) => {
+            CliError::Message(format!("credential '{id}' not found"))
+        }
+        other => other,
+    }
+}
+
 pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id = prompt::resolve_line(id, "Credential title/id: ")?;
     if id.is_empty() {
@@ -238,7 +247,8 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         let id = id.clone();
         async move { api.get_credential(&token, &id).await }
     })
-    .await?;
+    .await
+    .map_err(|e| map_credential_not_found(&id, e))?;
 
     let secret = crypto::decrypt_secret(
         &vault,
@@ -281,25 +291,24 @@ pub async fn edit(paths: &config::Paths, target: Option<String>) -> CliResult<()
         let target = target.clone();
         async move { api.get_credential(&token, &target).await }
     })
-    .await?;
+    .await
+    .map_err(|e| map_credential_not_found(&target, e))?;
 
-    println!("Leave blank to keep current value. For username/url/notes, enter '-' to clear.");
-    let name_input = prompt_line_with_current("Name", &row.name)?;
-    let username_input =
-        prompt_line_with_current("Username", row.username.as_deref().unwrap_or(""))?;
-    let url_input = prompt_line_with_current("URL", row.url.as_deref().unwrap_or(""))?;
-    let notes_input = prompt_line_with_current("Notes", row.notes.as_deref().unwrap_or(""))?;
+    println!("Edit fields and press Enter to save. Clear a field to remove it.");
+    let name_input = prompt_prefilled("Name: ", &row.name)?;
+    if name_input.is_empty() {
+        return Err(CliError::Message("title cannot be empty".into()));
+    }
+    let username_input = prompt_prefilled("Username: ", row.username.as_deref().unwrap_or(""))?;
+    let url_input = prompt_prefilled("URL: ", row.url.as_deref().unwrap_or(""))?;
+    let notes_input = prompt_prefilled("Notes: ", row.notes.as_deref().unwrap_or(""))?;
     let secret = prompt::prompt_password("New secret (blank to keep): ")?;
 
     let mut req = UpdateCredentialRequest {
-        name: if name_input.is_empty() {
-            None
-        } else {
-            Some(Some(name_input))
-        },
-        username: prompt_optional_update(username_input),
-        url: prompt_optional_update(url_input),
-        notes: prompt_optional_update(notes_input),
+        name: Some(Some(name_input)),
+        username: Some(edited_optional(username_input)),
+        url: Some(edited_optional(url_input)),
+        notes: Some(edited_optional(notes_input)),
         password_ciphertext: None,
         password_nonce: None,
     };
@@ -319,7 +328,7 @@ pub async fn edit(paths: &config::Paths, target: Option<String>) -> CliResult<()
     })
     .await?;
 
-    println!("updated credential {}", updated.id);
+    println!("updated credential {}", updated.name);
     Ok(())
 }
 
@@ -344,7 +353,8 @@ pub async fn delete(paths: &config::Paths, target: Option<String>) -> CliResult<
         let id_owned = target.clone();
         async move { api.delete_credential(&token, &id_owned).await }
     })
-    .await?;
+    .await
+    .map_err(|e| map_credential_not_found(&target, e))?;
 
     println!("deleted {target}");
     Ok(())

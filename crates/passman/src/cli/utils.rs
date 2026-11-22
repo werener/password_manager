@@ -151,14 +151,12 @@ pub(super) fn resolve_optional_field(
     }
 }
 
-pub(super) fn prompt_optional_update(value: String) -> Option<Option<String>> {
+pub(super) fn edited_optional(value: String) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         None
-    } else if trimmed == "-" {
-        Some(None)
     } else {
-        Some(Some(trimmed.to_string()))
+        Some(trimmed.to_string())
     }
 }
 
@@ -180,8 +178,8 @@ pub(super) fn sanitize_terminal(input: &str) -> String {
     out
 }
 
-pub(super) fn prompt_line_with_current(label: &str, current: &str) -> Result<String, CliError> {
-    prompt::prompt_line(&format!("{label} [{}]: ", sanitize_terminal(current)))
+pub(super) fn prompt_prefilled(label: &str, current: &str) -> Result<String, CliError> {
+    prompt::prompt_line_prefilled(label, current)
 }
 
 #[cfg(test)]
