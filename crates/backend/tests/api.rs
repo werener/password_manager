@@ -4,14 +4,12 @@ use axum::{
     body::Body,
     http::{Method, Request, StatusCode, header},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
 use migration::{Migrator, MigratorTrait};
 use password_manager_backend::{app, config::Config};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 use serde_json::{Value, json};
-use sha2::Digest;
 use tower::{Service, ServiceExt, util::BoxCloneService};
 use uuid::Uuid;
 
@@ -113,15 +111,15 @@ fn auth_req(method: Method, uri: &str, token: &str) -> Request<Body> {
 }
 
 fn b64(bytes: &[u8]) -> String {
-    BASE64.encode(bytes)
+    password_manager_crypto::core::base64::encode(bytes)
 }
 
 #[tokio::test]
 async fn auth_flow_and_credentials_flow() {
     let (mut app, db, mut redis_conn, _state) = setup().await;
     let email = format!("test+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier-1");
-    let kdf_salt = b64(&[1u8; 16]);
+    let verifier = b64(&[1u8; 32]);
+    let kdf_salt = b64(&[1u8; 32]);
 
     // register
     let (status, body) = request(
@@ -164,7 +162,7 @@ async fn auth_flow_and_credentials_flow() {
         json_req(
             Method::POST,
             "/auth/login",
-            json!({"email":email,"auth_verifier":b64(b"wrong")}),
+            json!({"email":email,"auth_verifier":b64(&[8u8;32])}),
         ),
     )
     .await;
@@ -185,7 +183,7 @@ async fn auth_flow_and_credentials_flow() {
     let refresh = login["refresh_token"].as_str().unwrap().to_string();
 
     // create credential
-    let create_body = json!({"name":"n","username":"u","url":"https://x","notes":"note","password_ciphertext":b64(b"ct"),"password_nonce":b64(b"nonce1234567")});
+    let create_body = json!({"name":"n","username":"u","url":"https://x","notes":"note","password_ciphertext":b64(b"ct"),"password_nonce":b64(&[7u8;24])});
     let mut create_req = auth_json_req(Method::POST, "/credentials", access, create_body.clone());
     create_req
         .headers_mut()
@@ -281,8 +279,8 @@ async fn auth_flow_and_credentials_flow() {
 async fn login_rate_limit_and_auth_errors() {
     let (mut app, db, mut redis_conn, _state) = setup().await;
     let email = format!("rl+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier-rl");
-    let kdf_salt = b64(&[2u8; 16]);
+    let verifier = b64(&[5u8; 32]);
+    let kdf_salt = b64(&[2u8; 32]);
 
     let (status, _) = request(
         &mut app,
@@ -349,8 +347,8 @@ async fn credentials_security_and_validation() {
     let (mut app, db, mut redis_conn, _state) = setup().await;
     let email_a = format!("a+{}@example.com", Uuid::new_v4());
     let email_b = format!("b+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier");
-    let salt = b64(&[3u8; 16]);
+    let verifier = b64(&[9u8; 32]);
+    let salt = b64(&[3u8; 32]);
     for email in [&email_a, &email_b] {
         let (status, _) = request(
             &mut app,
@@ -388,7 +386,7 @@ async fn credentials_security_and_validation() {
     assert_eq!(status, StatusCode::OK);
     let token_b = login_b["access_token"].as_str().unwrap();
 
-    let create = json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":b64(b"ct"),"password_nonce":b64(b"nonce1234567")});
+    let create = json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":b64(b"ct"),"password_nonce":b64(&[7u8;24])});
     let mut req = auth_json_req(Method::POST, "/credentials", token_a, create.clone());
     req.headers_mut()
         .insert("Idempotency-Key", "k1".parse().unwrap());
@@ -420,7 +418,7 @@ async fn credentials_security_and_validation() {
         Method::POST,
         "/credentials",
         token_a,
-        json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":"not-base64!!","password_nonce":b64(b"nonce1234567")}),
+        json!({"name":"n","username":"u","url":"https://x","notes":"n","password_ciphertext":"not-base64!!","password_nonce":b64(&[7u8;24])}),
     );
     bad2.headers_mut()
         .insert("Idempotency-Key", "k2".parse().unwrap());
@@ -466,20 +464,20 @@ async fn sqlx_cleanup(db: &DatabaseConnection, email: &str) {
 
 async fn redis_cleanup_login(redis: &mut ConnectionManager, email: &str) {
     let normalized = email.trim().to_lowercase();
-    let hash = sha2::Sha256::digest(normalized.as_bytes());
-    let key = format!("rl:login:127.0.0.1:{:x}", hash);
+    let hash = password_manager_crypto::server::hash_email_for_rate_limit(&normalized);
+    let key = format!("rl:login:127.0.0.1:{}", hash);
     let _: () = redis::cmd("DEL")
         .arg(&key)
         .query_async(redis)
         .await
         .unwrap_or(());
-    let key9 = format!("rl:login:127.0.0.9:{:x}", hash);
+    let key9 = format!("rl:login:127.0.0.9:{}", hash);
     let _: () = redis::cmd("DEL")
         .arg(&key9)
         .query_async(redis)
         .await
         .unwrap_or(());
-    let key8 = format!("rl:login:127.0.0.8:{:x}", hash);
+    let key8 = format!("rl:login:127.0.0.8:{}", hash);
     let _: () = redis::cmd("DEL")
         .arg(&key8)
         .query_async(redis)
@@ -491,8 +489,8 @@ async fn redis_cleanup_login(redis: &mut ConnectionManager, email: &str) {
 async fn refresh_concurrent_same_token_only_one_succeeds() {
     let (mut app, db, mut redis_conn, _state) = setup().await;
     let email = format!("race+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier-race");
-    let kdf_salt = b64(&[7u8; 16]);
+    let verifier = b64(&[6u8; 32]);
+    let kdf_salt = b64(&[7u8; 32]);
 
     let (status, _) = request(
         &mut app,
@@ -584,8 +582,11 @@ async fn refresh_concurrent_same_token_only_one_succeeds() {
 async fn login_does_not_persist_refresh_token_when_access_mint_fails() {
     let (mut app, db, mut redis_conn, state) = setup().await;
     let email = format!("mintfail+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier-mintfail");
-    let kdf_salt = b64(&[8u8; 16]);
+    let verifier = b64(&[
+        17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+        40, 41, 42, 43, 44, 45, 46, 47, 48,
+    ]);
+    let kdf_salt = b64(&[8u8; 32]);
 
     let (status, _) = request(
         &mut app,
@@ -642,8 +643,11 @@ async fn login_does_not_persist_refresh_token_when_access_mint_fails() {
 async fn refresh_does_not_rotate_when_access_mint_fails() {
     let (mut app, db, mut redis_conn, state) = setup().await;
     let email = format!("refresh-mint-fail+{}@example.com", Uuid::new_v4());
-    let verifier = b64(b"verifier-refresh-mint");
-    let kdf_salt = b64(&[9u8; 16]);
+    let verifier = b64(&[
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+        44, 45, 46, 47, 48, 49, 50, 51, 52,
+    ]);
+    let kdf_salt = b64(&[9u8; 32]);
 
     let (status, _) = request(
         &mut app,
@@ -794,8 +798,6 @@ async fn framework_rejections_are_mapped_to_app_errors() {
         auth_req(Method::GET, "/credentials/not-a-uuid", token),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_eq!(body["code"], "bad_request");
-    let msg = body["message"].as_str().unwrap_or_default();
-    assert!(!msg.to_lowercase().contains("uuid parsing failed"), "{msg}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "not_found");
 }

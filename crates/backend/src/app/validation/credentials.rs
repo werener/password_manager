@@ -1,8 +1,9 @@
 use password_manager_dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest};
 
+use password_manager_crypto::core;
+
 use crate::{
     app::extractors::IdempotencyKey,
-    crypto::decode_base64,
     error::{AppError, AppResult},
 };
 
@@ -32,8 +33,11 @@ impl CreateCredentialInput {
             &payload.notes,
         )?;
         let password_ciphertext =
-            decode_base64("password_ciphertext", &payload.password_ciphertext)?;
-        let password_nonce = decode_base64("password_nonce", &payload.password_nonce)?;
+            core::base64::decode(&payload.password_ciphertext).map_err(|_| {
+                AppError::BadRequest("password_ciphertext must be valid base64".to_string())
+            })?;
+        let password_nonce = core::base64::decode(&payload.password_nonce)
+            .map_err(|_| AppError::BadRequest("password_nonce must be valid base64".to_string()))?;
         validate_secret(&password_ciphertext, &password_nonce)?;
 
         Ok(Self {
@@ -85,8 +89,12 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
             payload.password_nonce.as_ref(),
         ) {
             (Some(Some(ct)), Some(Some(nonce))) => {
-                let ciphertext = decode_base64("password_ciphertext", ct)?;
-                let nonce_bytes = decode_base64("password_nonce", nonce)?;
+                let ciphertext = core::base64::decode(ct).map_err(|_| {
+                    AppError::BadRequest("password_ciphertext must be valid base64".to_string())
+                })?;
+                let nonce_bytes = core::base64::decode(nonce).map_err(|_| {
+                    AppError::BadRequest("password_nonce must be valid base64".to_string())
+                })?;
                 validate_secret(&ciphertext, &nonce_bytes)?;
                 Some(SecretBytes {
                     ciphertext,

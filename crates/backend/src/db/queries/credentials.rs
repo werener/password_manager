@@ -5,7 +5,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::{db::models::credential, error::AppResult};
+use crate::{
+    db::models::credential,
+    error::{AppError, AppResult},
+};
 
 pub struct NewCredential {
     pub id: Uuid,
@@ -84,4 +87,26 @@ pub async fn update(
 pub async fn delete_by_id(db: &DatabaseConnection, id: Uuid) -> AppResult<()> {
     credential::Entity::delete_by_id(id).exec(db).await?;
     Ok(())
+}
+
+pub async fn find_owned_by_id_or_name(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    id_or_name: &str,
+) -> AppResult<credential::Model> {
+    if let Ok(id) = Uuid::parse_str(id_or_name) {
+        if let Some(row) = find_owned(db, user_id, id).await? {
+            return Ok(row);
+        }
+    }
+    find_owned_by_name(db, user_id, id_or_name)
+        .await?
+        .ok_or(AppError::NotFound)
+}
+
+pub fn is_unique_violation(err: &DbErr) -> bool {
+    matches!(
+        err.sql_err(),
+        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+    )
 }

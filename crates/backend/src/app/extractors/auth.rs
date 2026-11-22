@@ -4,7 +4,9 @@ use axum::{
     http::{header::AUTHORIZATION, request::Parts},
 };
 
-use crate::{app::state::AppState, crypto::decode_access_token, error::AppError};
+use password_manager_crypto::server;
+
+use crate::{app::state::AppState, error::AppError};
 
 /// Authenticated user extracted from a Bearer access token.
 #[derive(Debug, Clone, Copy)]
@@ -24,7 +26,8 @@ impl FromRequestParts<AppState> for AuthUser {
             .and_then(|v| v.to_str().ok())
             .ok_or(AppError::Unauthorized)?;
         let token = auth.strip_prefix("Bearer ").ok_or(AppError::Unauthorized)?;
-        let claims = decode_access_token(&state.config.jwt_secret, token)?;
+        let claims = server::decode_access_token(&state.config.jwt_secret, token)
+            .map_err(|_| AppError::Unauthorized)?;
         Ok(Self(claims.sub))
     }
 }

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use axum::{
     Extension, Json, Router,
@@ -10,36 +10,34 @@ use axum::{
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use redis::AsyncCommands;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use password_manager_dto::auth::{
-        AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
-        RefreshRequest, RegisterRequest, RegisterResponse,
-    };
+    AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
+    RefreshRequest, RegisterRequest, RegisterResponse,
+};
+
+use password_manager_crypto::{core, server};
 
 use crate::{
     app::{
         state::AppState,
         validation::auth::{LoginInput, LogoutInput, PreloginInput, RefreshInput, RegisterInput},
     },
-    crypto::{
-        create_access_token, encode_base64, generate_refresh_token, hash_auth_verifier,
-        hash_refresh_token, verify_auth_verifier,
-    },
     db::queries::{refresh_tokens, users},
     error::{AppError, AppResult},
 };
 
-pub type AccessTokenMinter =
-    Arc<dyn Fn(&str, Uuid, Uuid, Duration) -> AppResult<String> + Send + Sync>;
+pub type AccessTokenMinter = Arc<dyn Fn(&str, Uuid, Uuid, u64) -> AppResult<String> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct AccessTokenMinterExt(pub AccessTokenMinter);
 
 impl Default for AccessTokenMinterExt {
     fn default() -> Self {
-        Self(Arc::new(create_access_token))
+        Self(Arc::new(|s, u, sid, ttl| {
+            server::create_access_token(s, u, sid, ttl).map_err(|_| AppError::Internal)
+        }))
     }
 }
 
@@ -65,7 +63,8 @@ async fn register(
         return Err(AppError::Conflict("email already registered".to_string()));
     }
 
-    let password_hash = hash_auth_verifier(&input.verifier_bytes)?;
+    let password_hash =
+        core::hash::argon2_hash(&input.verifier_bytes).map_err(|_| AppError::Internal)?;
     let now = Utc::now().fixed_offset();
     let id = Uuid::new_v4();
 
@@ -105,7 +104,7 @@ async fn prelogin(
     };
 
     Ok(Json(PreloginResponse {
-        kdf_salt: encode_base64(&kdf_salt),
+        kdf_salt: core::base64::encode(&kdf_salt),
     }))
 }
 
@@ -128,7 +127,8 @@ async fn login(
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    let ok = verify_auth_verifier(&input.verifier_bytes, &user.password_hash)?;
+    let ok = core::hash::argon2_verify(&input.verifier_bytes, &user.password_hash)
+        .map_err(|_| AppError::Internal)?;
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -142,10 +142,10 @@ async fn refresh(
     Json(payload): Json<RefreshRequest>,
 ) -> AppResult<Json<AuthTokensResponse>> {
     let input = RefreshInput::try_from(payload)?;
-    let token_hash = hash_refresh_token(&input.refresh_token);
+    let token_hash = core::hash::sha256(input.refresh_token.as_bytes());
 
-    let new_refresh_token = generate_refresh_token();
-    let new_hash = hash_refresh_token(&new_refresh_token);
+    let new_refresh_token = server::generate_refresh_token();
+    let new_hash = core::hash::sha256(new_refresh_token.as_bytes());
     let new_id = Uuid::new_v4();
     let expires_at = (Utc::now()
         + ChronoDuration::from_std(state.config.refresh_token_ttl)
@@ -183,7 +183,7 @@ async fn refresh(
         token_type: "Bearer".to_string(),
         access_expires_in_secs: state.config.access_token_ttl.as_secs(),
         refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
-        kdf_salt: encode_base64(&user.kdf_salt),
+        kdf_salt: core::base64::encode(&user.kdf_salt),
     }))
 }
 
@@ -192,17 +192,13 @@ async fn logout(
     Json(payload): Json<LogoutRequest>,
 ) -> AppResult<StatusCode> {
     let input = LogoutInput::try_from(payload)?;
-    let token_hash = hash_refresh_token(&input.refresh_token);
+    let token_hash = core::hash::sha256(input.refresh_token.as_bytes());
     refresh_tokens::delete_by_hash(&state.db, &token_hash).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 fn fake_kdf_salt(secret: &str, email_normalized: &str) -> Vec<u8> {
-    let mut hasher = Sha256::new();
-    hasher.update(secret.as_bytes());
-    hasher.update(b":prelogin:");
-    hasher.update(email_normalized.as_bytes());
-    hasher.finalize()[..16].to_vec()
+    server::deterministic_fake_kdf_salt(secret, email_normalized)
 }
 
 fn minter_ext(m: Option<Extension<AccessTokenMinterExt>>) -> AccessTokenMinterExt {
@@ -219,7 +215,7 @@ fn mint_access_token(
         &state.config.jwt_secret,
         user_id,
         session_id,
-        state.config.access_token_ttl,
+        state.config.access_token_ttl.as_secs() as u64,
     )
 }
 
@@ -230,8 +226,8 @@ async fn issue_tokens(
     kdf_salt: &[u8],
 ) -> AppResult<Json<AuthTokensResponse>> {
     let session_id = Uuid::new_v4();
-    let refresh_token = generate_refresh_token();
-    let refresh_hash = hash_refresh_token(&refresh_token);
+    let refresh_token = server::generate_refresh_token();
+    let refresh_hash = core::hash::sha256(refresh_token.as_bytes());
     let expires_at = (Utc::now()
         + ChronoDuration::from_std(state.config.refresh_token_ttl)
             .map_err(|_| AppError::Internal)?)
@@ -258,7 +254,7 @@ async fn issue_tokens(
         token_type: "Bearer".to_string(),
         access_expires_in_secs: state.config.access_token_ttl.as_secs(),
         refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
-        kdf_salt: encode_base64(kdf_salt),
+        kdf_salt: core::base64::encode(kdf_salt),
     }))
 }
 
@@ -267,8 +263,8 @@ async fn enforce_login_rate_limit(
     ip: &str,
     email_normalized: &str,
 ) -> AppResult<()> {
-    let email_hash = Sha256::digest(email_normalized.as_bytes());
-    let key = format!("rl:login:{}:{:x}", ip, email_hash);
+    let email_hash = server::hash_email_for_rate_limit(email_normalized);
+    let key = format!("rl:login:{}:{}", ip, email_hash);
     let mut conn = state.redis.clone();
     let count: i64 = conn.incr(&key, 1).await?;
     if count == 1 {

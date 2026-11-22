@@ -8,10 +8,11 @@ use chrono::Utc;
 use sea_orm::Set;
 use uuid::Uuid;
 
+use password_manager_crypto::core;
 use password_manager_dto::credentials::{
-        CreateCredentialRequest, CredentialMetadataResponse, CredentialResponse,
-        UpdateCredentialRequest,
-    };
+    CreateCredentialRequest, CredentialMetadataResponse, CredentialResponse,
+    UpdateCredentialRequest,
+};
 
 use crate::{
     app::{
@@ -19,7 +20,6 @@ use crate::{
         state::AppState,
         validation::credentials::{CreateCredentialInput, UpdateCredentialInput},
     },
-    crypto::encode_base64,
     db::{models::credential, queries::credentials},
     error::{AppError, AppResult},
 };
@@ -59,7 +59,7 @@ async fn create(
     {
         Ok(saved) => Ok((StatusCode::CREATED, Json(to_response(saved)))),
         Err(e) => {
-            if is_unique_violation(&e) {
+            if credentials::is_unique_violation(&e) {
                 let msg = e.to_string();
                 if msg.contains("uq_credentials_user_id_name") {
                     return Err(AppError::Conflict(
@@ -99,7 +99,7 @@ async fn get(
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
 ) -> AppResult<Json<CredentialResponse>> {
-    let row = find_owned_by_id_or_name(&state, user_id, &id).await?;
+    let row = credentials::find_owned_by_id_or_name(&state.db, user_id, &id).await?;
     Ok(Json(to_response(row)))
 }
 
@@ -110,7 +110,7 @@ async fn update(
     Json(payload): Json<UpdateCredentialRequest>,
 ) -> AppResult<Json<CredentialResponse>> {
     let input = UpdateCredentialInput::try_from(payload)?;
-    let row = find_owned_by_id_or_name(&state, user_id, &id).await?;
+    let row = credentials::find_owned_by_id_or_name(&state.db, user_id, &id).await?;
 
     let mut active: credential::ActiveModel = row.into();
     if let Some(name) = input.name {
@@ -134,7 +134,7 @@ async fn update(
     let saved = match credentials::update(&state.db, active).await {
         Ok(saved) => saved,
         Err(AppError::Database(e)) => {
-            if is_unique_violation(&e) {
+            if credentials::is_unique_violation(&e) {
                 let msg = e.to_string();
                 if msg.contains("uq_credentials_user_id_name") {
                     return Err(AppError::Conflict(
@@ -154,24 +154,9 @@ async fn delete(
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
-    let row = find_owned_by_id_or_name(&state, user_id, &id).await?;
+    let row = credentials::find_owned_by_id_or_name(&state.db, user_id, &id).await?;
     credentials::delete_by_id(&state.db, row.id).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn find_owned_by_id_or_name(
-    state: &AppState,
-    user_id: Uuid,
-    id_or_name: &str,
-) -> AppResult<credential::Model> {
-    if let Ok(id) = Uuid::parse_str(id_or_name) {
-        if let Some(row) = credentials::find_owned(&state.db, user_id, id).await? {
-            return Ok(row);
-        }
-    }
-    credentials::find_owned_by_name(&state.db, user_id, id_or_name)
-        .await?
-        .ok_or(AppError::NotFound)
 }
 
 fn to_response(row: credential::Model) -> CredentialResponse {
@@ -181,14 +166,7 @@ fn to_response(row: credential::Model) -> CredentialResponse {
         username: row.username,
         url: row.url,
         notes: row.notes,
-        password_ciphertext: encode_base64(&row.password_ciphertext),
-        password_nonce: encode_base64(&row.password_nonce),
+        password_ciphertext: core::base64::encode(&row.password_ciphertext),
+        password_nonce: core::base64::encode(&row.password_nonce),
     }
-}
-
-fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
-    matches!(
-        err.sql_err(),
-        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-    )
 }

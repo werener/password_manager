@@ -1,4 +1,5 @@
-use password_manager_client::{api::ApiClient, config, crypto, session::Session};
+use password_manager_client::{api::ApiClient, config, session::Session};
+use password_manager_crypto::{client as crypto, core};
 use password_manager_dto::{
     auth::{LoginRequest, LogoutRequest, PreloginRequest, RegisterRequest},
     credentials::{CreateCredentialRequest, UpdateCredentialRequest},
@@ -18,7 +19,7 @@ fn get_server(cfg: &config::Config) -> CliResult<String> {
 
 fn resolve_email(email: Option<String>) -> CliResult<String> {
     let raw = prompt::resolve_line(email, "Email: ")?;
-    let email = crypto::normalize_email(&raw);
+    let email = raw.trim().to_lowercase();
     if email.is_empty() {
         return Err(CliError::Message("email cannot be empty".into()));
     }
@@ -131,15 +132,15 @@ pub async fn register(paths: &config::Paths, email: Option<String>) -> CliResult
     let email = resolve_email(email)?;
     let password = resolve_master_for_register()?;
 
-    let salt = crypto::generate_kdf_salt();
+    let salt: [u8; 32] = core::rand::bytes();
     let master = crypto::derive_master_key(&password, &salt)?;
     let verifier = crypto::derive_auth_verifier(&master)?;
 
     let api = ApiClient::new(server)?;
     api.register(&RegisterRequest {
         email: email.clone(),
-        auth_verifier: crypto::encode_b64(&verifier),
-        kdf_salt: crypto::encode_b64(&salt),
+        auth_verifier: core::base64::encode(&verifier),
+        kdf_salt: core::base64::encode(&salt),
     })
     .await?;
 
@@ -159,14 +160,15 @@ pub async fn login(paths: &config::Paths, email: Option<String>) -> CliResult<()
             email: email.clone(),
         })
         .await?;
-    let salt = crypto::decode_b64("kdf_salt", &pre.kdf_salt)?;
+    let salt = core::base64::decode(&pre.kdf_salt)
+        .map_err(|_| CliError::Message("kdf_salt must be valid base64".to_string()))?;
     let master = crypto::derive_master_key(&password, &salt)?;
     let verifier = crypto::derive_auth_verifier(&master)?;
 
     let resp = api
         .login(&LoginRequest {
             email: email.clone(),
-            auth_verifier: crypto::encode_b64(&verifier),
+            auth_verifier: core::base64::encode(&verifier),
         })
         .await?;
 
@@ -214,7 +216,8 @@ fn derive_vault_key_for_session(
     sess: &Session,
     password: &str,
 ) -> CliResult<zeroize::Zeroizing<[u8; 32]>> {
-    let salt = crypto::decode_b64("kdf_salt", &sess.kdf_salt)?;
+    let salt = core::base64::decode(&sess.kdf_salt)
+        .map_err(|_| CliError::Message("kdf_salt must be valid base64".to_string()))?;
     let master = crypto::derive_master_key(password, &salt)?;
     let vault = crypto::derive_vault_key(&master)?;
     Ok(vault)

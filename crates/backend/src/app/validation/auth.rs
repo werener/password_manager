@@ -2,10 +2,24 @@ use password_manager_dto::auth::{
     LoginRequest, LogoutRequest, PreloginRequest, RefreshRequest, RegisterRequest,
 };
 
-use crate::{
-    crypto::{decode_base64, normalize_email, validate_email},
-    error::AppError,
-};
+use password_manager_crypto::core;
+
+use crate::error::AppError;
+
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn validate_email(email: &str) -> Result<(), AppError> {
+    let ok = email.contains('@')
+        && !email.starts_with('@')
+        && !email.ends_with('@')
+        && email.len() <= 320;
+    if !ok {
+        return Err(AppError::BadRequest("invalid email".to_string()));
+    }
+    Ok(())
+}
 
 use super::rules::validate_len;
 
@@ -24,8 +38,10 @@ impl TryFrom<RegisterRequest> for RegisterInput {
         let email_normalized = normalize_email(&email);
         validate_email(&email_normalized)?;
 
-        let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
-        let kdf_salt = decode_base64("kdf_salt", &payload.kdf_salt)?;
+        let verifier_bytes = core::base64::decode(&payload.auth_verifier)
+            .map_err(|_| AppError::BadRequest("auth_verifier must be valid base64".to_string()))?;
+        let kdf_salt = core::base64::decode(&payload.kdf_salt)
+            .map_err(|_| AppError::BadRequest("kdf_salt must be valid base64".to_string()))?;
         validate_len("auth_verifier", &verifier_bytes, 32, 32)?;
         validate_len("kdf_salt", &kdf_salt, 32, 32)?;
 
@@ -68,7 +84,8 @@ impl TryFrom<LoginRequest> for LoginInput {
                 "auth_verifier is required".to_string(),
             ));
         }
-        let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
+        let verifier_bytes = core::base64::decode(&payload.auth_verifier)
+            .map_err(|_| AppError::BadRequest("auth_verifier must be valid base64".to_string()))?;
         validate_len("auth_verifier", &verifier_bytes, 32, 32)?;
         Ok(Self {
             email_normalized,

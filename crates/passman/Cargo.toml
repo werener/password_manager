@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 password_manager_dto = { path = "../dto" }
 password_manager_client = { path = "../client" }
+password_manager_crypto = { path = "../crypto" }
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rpassword = "7"

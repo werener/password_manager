@@ -1652,6 +1652,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "password_manager_client",
+ "password_manager_crypto",
  "password_manager_dto",
  "reqwest",
  "rpassword",
@@ -1677,22 +1678,17 @@ dependencies = [
 name = "password_manager_backend"
 version = "0.1.0"
 dependencies = [
- "argon2",
  "axum",
- "base64 0.22.1",
  "chrono",
  "dotenvy",
  "http-body-util",
- "jsonwebtoken",
  "migration",
  "password_manager_crypto",
  "password_manager_dto",
- "rand 0.8.8",
  "redis",
  "sea-orm",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tower",
@@ -1706,19 +1702,14 @@ name = "password_manager_client"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "base64 0.22.1",
- "chacha20poly1305",
  "chrono",
  "directories",
  "fd-lock",
- "hkdf",
  "password_manager_crypto",
  "password_manager_dto",
- "rand 0.8.8",
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 1.0.69",
  "toml",
  "uuid",
@@ -1729,7 +1720,19 @@ dependencies = [
 name = "password_manager_crypto"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "base64 0.22.1",
+ "chacha20poly1305",
+ "chrono",
+ "hkdf",
+ "jsonwebtoken",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

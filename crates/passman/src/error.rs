@@ -1,5 +1,8 @@
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
+    #[error(transparent)]
+    Crypto(#[from] password_manager_crypto::CryptoError),
+
     #[error("{0}")]
     Message(String),
 
