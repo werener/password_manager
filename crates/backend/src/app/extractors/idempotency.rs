@@ -4,9 +4,7 @@ use axum::{
     http::{HeaderName, request::Parts},
 };
 
-use crate::{
-    app::state::AppState, app::validation::rules::validate_idempotency_key, error::AppError,
-};
+use crate::{app::AppState, app::validation::rules::validate_idempotency_key, error::AppError};
 
 static IDEMPOTENCY_KEY: HeaderName = HeaderName::from_static("idempotency-key");
 

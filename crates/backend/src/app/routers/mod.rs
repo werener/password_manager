@@ -4,7 +4,7 @@ pub mod credentials;
 use axum::{Json, Router, extract::State, http::StatusCode, middleware, routing::get};
 use serde::Serialize;
 
-use crate::app::state::AppState;
+use crate::app::AppState;
 
 #[derive(Serialize)]
 struct HealthResponse {

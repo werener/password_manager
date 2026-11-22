@@ -21,7 +21,7 @@ use password_manager_crypto::{core, server};
 
 use crate::{
     app::{
-        state::AppState,
+        AppState,
         validation::auth::{LoginInput, LogoutInput, PreloginInput, RefreshInput, RegisterInput},
     },
     db::queries::{refresh_tokens, users},

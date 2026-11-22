@@ -1,6 +1,5 @@
 pub mod extractors;
 pub mod routers;
-pub mod state;
 pub mod validation;
 
 use std::time::Duration;
@@ -11,7 +10,13 @@ use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
 use crate::{config::Config, error::AppError};
 
-pub use state::AppState;
+/// Shared application state for HTTP handlers.
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DatabaseConnection,
+    pub redis: redis::aio::ConnectionManager,
+    pub config: Config,
+}
 
 /// Connects to Postgres using application config.
 pub async fn connect_db(config: &Config) -> Result<DatabaseConnection, AppError> {

@@ -27,7 +27,7 @@ async fn setup() -> (
     BoxCloneService<Request<Body>, axum::response::Response, std::convert::Infallible>,
     DatabaseConnection,
     ConnectionManager,
-    app::state::AppState,
+    app::AppState,
 ) {
     let config = test_config();
     let mut opt = ConnectOptions::new(config.database_url.clone());
@@ -39,7 +39,7 @@ async fn setup() -> (
     let redis = ConnectionManager::new(redis_client)
         .await
         .expect("redis connect");
-    let state = app::state::AppState {
+    let state = app::AppState {
         db: db.clone(),
         redis: redis.clone(),
         config,

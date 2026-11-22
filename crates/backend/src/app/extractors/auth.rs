@@ -6,7 +6,7 @@ use axum::{
 
 use password_manager_crypto::server;
 
-use crate::{app::state::AppState, error::AppError};
+use crate::{app::AppState, error::AppError};
 
 /// Authenticated user extracted from a Bearer access token.
 #[derive(Debug, Clone, Copy)]

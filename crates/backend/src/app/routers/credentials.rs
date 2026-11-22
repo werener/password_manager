@@ -16,8 +16,8 @@ use password_manager_dto::credentials::{
 
 use crate::{
     app::{
+        AppState,
         extractors::{AuthUser, IdempotencyKey},
-        state::AppState,
         validation::credentials::{CreateCredentialInput, UpdateCredentialInput},
     },
     db::{models::credential, queries::credentials},
