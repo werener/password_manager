@@ -5,7 +5,7 @@ use axum::{
     http::{Method, Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use migration::{Migrator, MigratorTrait};
+use password_manager_backend::migration::{Migrator, MigratorTrait};
 use password_manager_backend::{app, config::Config};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};

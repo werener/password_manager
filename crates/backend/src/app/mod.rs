@@ -4,7 +4,7 @@ pub mod validation;
 
 use std::time::Duration;
 
-use migration::{Migrator, MigratorTrait};
+use crate::migration::{Migrator, MigratorTrait};
 use redis::aio::ConnectionManager;
 use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 

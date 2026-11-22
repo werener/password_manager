@@ -4,6 +4,5 @@ members = [
     "crates/dto",
     "crates/crypto",
     "crates/passman",
-    "crates/migration",
 ]
 resolver = "2"

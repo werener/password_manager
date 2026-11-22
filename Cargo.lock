@@ -1453,14 +1453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "migration"
-version = "0.1.0"
-dependencies = [
- "sea-orm-migration",
- "tokio",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1686,11 +1678,11 @@ dependencies = [
  "chrono",
  "dotenvy",
  "http-body-util",
- "migration",
  "password_manager_crypto",
  "password_manager_dto",
  "redis",
  "sea-orm",
+ "sea-orm-migration",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
