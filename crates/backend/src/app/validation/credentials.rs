@@ -67,6 +67,9 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
 
     fn try_from(payload: UpdateCredentialRequest) -> Result<Self, Self::Error> {
         if let Some(name) = &payload.name {
+            let Some(name) = name else {
+                return Err(AppError::BadRequest("name cannot be null".to_string()));
+            };
             validate_text("name", name, 1, 200)?;
         }
         if let Some(username) = &payload.username {
@@ -79,13 +82,18 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
             validate_opt_text("notes", notes, 512)?;
         }
         let secret = match (payload.password_ciphertext, payload.password_nonce) {
-            (Some(ct), Some(nonce)) => {
+            (Some(Some(ct)), Some(Some(nonce))) => {
                 let ciphertext = decode_base64("password_ciphertext", &ct)?;
                 let nonce = decode_base64("password_nonce", &nonce)?;
                 validate_secret(&ciphertext, &nonce)?;
                 Some(SecretBytes { ciphertext, nonce })
             }
             (None, None) => None,
+            (Some(None), _) | (_, Some(None)) => {
+                return Err(AppError::BadRequest(
+                    "password_ciphertext and password_nonce cannot be null".to_string(),
+                ));
+            }
             _ => {
                 return Err(AppError::BadRequest(
                     "password_ciphertext and password_nonce must be provided together".to_string(),
@@ -94,7 +102,7 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
         };
 
         Ok(Self {
-            name: payload.name.map(|v| v.trim().to_string()),
+            name: payload.name.and_then(|v| v).map(|v| v.trim().to_string()),
             username: payload.username.map(|v| v.map(|s| s.trim().to_string())),
             url: payload.url,
             notes: payload.notes,

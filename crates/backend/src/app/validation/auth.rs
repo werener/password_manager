@@ -25,8 +25,8 @@ impl TryFrom<RegisterRequest> for RegisterInput {
 
         let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
         let kdf_salt = decode_base64("kdf_salt", &payload.kdf_salt)?;
-        validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
-        validate_len("kdf_salt", &kdf_salt, 16, 64)?;
+        validate_len("auth_verifier", &verifier_bytes, 32, 32)?;
+        validate_len("kdf_salt", &kdf_salt, 32, 32)?;
 
         Ok(Self {
             email,
@@ -68,7 +68,7 @@ impl TryFrom<LoginRequest> for LoginInput {
             ));
         }
         let verifier_bytes = decode_base64("auth_verifier", &payload.auth_verifier)?;
-        validate_len("auth_verifier", &verifier_bytes, 1, 256)?;
+        validate_len("auth_verifier", &verifier_bytes, 32, 32)?;
         Ok(Self {
             email_normalized,
             verifier_bytes,

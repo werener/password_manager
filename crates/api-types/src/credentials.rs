@@ -17,20 +17,44 @@ pub struct CreateCredentialRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCredentialRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub name: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub username: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub url: Option<Option<String>>,
-    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub notes: Option<Option<String>>,
     /// Client-side encrypted secret (opaque to server in zero-knowledge mode).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password_ciphertext: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub password_ciphertext: Option<Option<String>>,
     /// Nonce used by client-side encryption.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub password_nonce: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub password_nonce: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,7 +86,7 @@ mod tests {
     fn update_request_omits_unchanged_fields() {
         let req = UpdateCredentialRequest {
             name: None,
-            username: None, // keep
+            username: None,  // keep
             url: Some(None), // clear
             notes: Some(Some("n".into())),
             password_ciphertext: None,

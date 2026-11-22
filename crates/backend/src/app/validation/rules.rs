@@ -64,6 +64,6 @@ pub fn validate_credential_metadata(
 
 pub fn validate_secret(ciphertext: &[u8], nonce: &[u8]) -> AppResult<()> {
     validate_len("password_ciphertext", ciphertext, 1, 8192)?;
-    validate_len("password_nonce", nonce, 1, 256)?;
+    validate_len("password_nonce", nonce, 24, 24)?;
     Ok(())
 }

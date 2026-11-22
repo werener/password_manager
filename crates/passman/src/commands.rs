@@ -348,7 +348,7 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         name: if name_input.trim().is_empty() {
             None
         } else {
-            Some(name_input.trim().to_string())
+            Some(Some(name_input.trim().to_string()))
         },
         username: prompt_optional_update(username_input),
         url: prompt_optional_update(url_input),
@@ -359,8 +359,8 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
 
     if !secret.is_empty() {
         let (ciphertext, nonce) = crypto::encrypt_secret(&vault, &sess.email, &secret)?;
-        req.password_ciphertext = Some(ciphertext);
-        req.password_nonce = Some(nonce);
+        req.password_ciphertext = Some(Some(ciphertext));
+        req.password_nonce = Some(Some(nonce));
     }
 
     let updated = with_auth_retry(&api, paths, &mut sess, |token| {
