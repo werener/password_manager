@@ -1,6 +1,11 @@
 use crate::error::{AppError, AppResult};
 
 pub fn validate_text(field: &'static str, value: &str, min: usize, max: usize) -> AppResult<()> {
+    if value.chars().any(|c| c.is_control()) {
+        return Err(AppError::BadRequest(format!(
+            "{field} contains invalid control characters"
+        )));
+    }
     let len = value.trim().chars().count();
     if len < min || len > max {
         return Err(AppError::BadRequest(format!(

@@ -313,11 +313,11 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         &row.password_nonce,
     )?;
     println!("id: {}", row.id);
-    println!("name: {}", row.name);
-    println!("username: {}", row.username.as_deref().unwrap_or(""));
-    println!("url: {}", row.url.as_deref().unwrap_or(""));
-    println!("notes: {}", row.notes.as_deref().unwrap_or(""));
-    println!("secret: {secret}");
+    println!("name: {}", sanitize_terminal(&row.name));
+    println!("username: {}", sanitize_terminal(row.username.as_deref().unwrap_or("")));
+    println!("url: {}", sanitize_terminal(row.url.as_deref().unwrap_or("")));
+    println!("notes: {}", sanitize_terminal(row.notes.as_deref().unwrap_or("")));
+    println!("secret: {}", sanitize_terminal(&secret));
     Ok(())
 }
 
@@ -336,24 +336,23 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     .await?;
 
     println!("Leave blank to keep current value. For username/url/notes, enter '-' to clear.");
-    let name = prompt::prompt_line(&format!("Name [{}]: ", row.name))?;
-    let username = prompt::prompt_line(&format!(
-        "Username [{}]: ",
-        row.username.as_deref().unwrap_or("")
-    ))?;
-    let url = prompt::prompt_line(&format!("URL [{}]: ", row.url.as_deref().unwrap_or("")))?;
-    let notes = prompt::prompt_line(&format!("Notes [{}]: ", row.notes.as_deref().unwrap_or("")))?;
+    let name_input = prompt_line_with_current("Name", &row.name)?;
+    let username_input =
+        prompt_line_with_current("Username", row.username.as_deref().unwrap_or(""))?;
+    let url_input = prompt_line_with_current("URL", row.url.as_deref().unwrap_or(""))?;
+    let notes_input =
+        prompt_line_with_current("Notes", row.notes.as_deref().unwrap_or(""))?;
     let secret = prompt::prompt_password("New secret (blank to keep): ")?;
 
     let mut req = UpdateCredentialRequest {
-        name: if name.trim().is_empty() {
+        name: if name_input.trim().is_empty() {
             None
         } else {
-            Some(name.trim().to_string())
+            Some(name_input.trim().to_string())
         },
-        username: prompt_optional_update(username),
-        url: prompt_optional_update(url),
-        notes: prompt_optional_update(notes),
+        username: prompt_optional_update(username_input),
+        url: prompt_optional_update(url_input),
+        notes: prompt_optional_update(notes_input),
         password_ciphertext: None,
         password_nonce: None,
     };
@@ -548,5 +547,43 @@ mod server_tests {
         assert_eq!(url, "http://new");
         let sess = Session::load(&paths.session).unwrap().unwrap();
         assert_eq!(sess.server_url, "http://new");
+    }
+}
+
+fn sanitize_terminal(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{{{:x}}}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn prompt_line_with_current(label: &str, current: &str) -> Result<String, CliError> {
+    prompt::prompt_line(&format!("{label} [{}]: ", sanitize_terminal(current)))
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_terminal;
+
+    #[test]
+    fn sanitize_terminal_escapes_control_chars() {
+        let s = "a\x1b[31mRED\x1b[0m\0\n";
+        let out = sanitize_terminal(s);
+        assert!(!out.contains('\x1b'));
+        assert!(!out.contains('\0'));
+        assert!(out.contains("\\u{1b}"));
+        assert!(out.contains("\\0"));
+        assert!(out.contains("\\n"));
     }
 }

@@ -705,3 +705,51 @@ async fn refresh_does_not_rotate_when_access_mint_fails() {
     sqlx_cleanup(&db, &email).await;
     redis_cleanup_login(&mut redis_conn, &email).await;
 }
+
+#[tokio::test]
+async fn credential_text_fields_reject_nul_control_chars() {
+    let (mut app, db, redis, _state) = setup().await;
+    let email = format!("nul-{}@example.com", Uuid::new_v4());
+    let (status, reg) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email": email, "auth_verifier": b64(&[7u8;32]), "kdf_salt": b64(&[8u8;32])}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{reg}");
+    let (status, login) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email": email, "auth_verifier": b64(&[7u8;32])}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    let token = login["access_token"].as_str().unwrap();
+
+    let fields = ["name", "username", "url", "notes"];
+    for field in fields {
+        let mut body = json!({
+            "name": "ok",
+            "username": null,
+            "url": null,
+            "notes": null,
+            "password_ciphertext": b64(b"ct"),
+            "password_nonce": b64(&[1u8;24]),
+        });
+        body[field] = json!("a\u{0000}b");
+        let mut req = auth_json_req(Method::POST, "/credentials", token, body);
+        req.headers_mut()
+            .insert("Idempotency-Key", format!("nul-{field}").parse().unwrap());
+        let (status, resp) = request(&mut app, req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {resp}");
+        assert_eq!(resp["code"], "bad_request", "{field}: {resp}");
+    }
+
+    let _ = (db, redis);
+}
