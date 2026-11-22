@@ -14,8 +14,7 @@ pub(super) fn get_server(cfg: &config::Config) -> CliResult<String> {
 }
 
 pub(super) fn resolve_email(email: Option<String>) -> CliResult<String> {
-    let raw = prompt::resolve_line(email, "Email: ")?;
-    let email = raw.trim().to_lowercase();
+    let email = prompt::resolve_line(email, "Email: ")?.to_lowercase();
     if email.is_empty() {
         return Err(CliError::Message("email cannot be empty".into()));
     }

@@ -118,7 +118,7 @@ pub async fn add(
     let username = resolve_optional_field(username, "Username: ")?;
     let secret = prompt::resolve_password(secret, "Credential (password): ")?;
     let name = prompt::resolve_line(name, "Title: ")?;
-    if name.trim().is_empty() {
+    if name.is_empty() {
         return Err(CliError::Message("title cannot be empty".into()));
     }
     let url = resolve_optional_field(url, "URL: ")?;
@@ -126,7 +126,7 @@ pub async fn add(
 
     let (ciphertext, nonce) = crypto::encrypt_secret(&vault, &sess.email, &secret)?;
     let req = CreateCredentialRequest {
-        name: name.trim().to_string(),
+        name,
         username,
         url,
         notes,
@@ -223,7 +223,6 @@ pub async fn list(paths: &config::Paths, show_ids: bool) -> CliResult<()> {
 
 pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id = prompt::resolve_line(id, "Credential title/id: ")?;
-    let id = id.trim().to_string();
     if id.is_empty() {
         return Err(CliError::Message(
             "credential title/id cannot be empty".into(),
@@ -265,10 +264,9 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
-    let id = prompt::resolve_line(id, "Credential title/id: ")?;
-    let id = id.trim().to_string();
-    if id.is_empty() {
+pub async fn edit(paths: &config::Paths, target: Option<String>) -> CliResult<()> {
+    let target = prompt::resolve_line(target, "Credential title/id: ")?;
+    if target.is_empty() {
         return Err(CliError::Message(
             "credential title/id cannot be empty".into(),
         ));
@@ -280,8 +278,8 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
-        let id = id.clone();
-        async move { api.get_credential(&token, &id).await }
+        let target = target.clone();
+        async move { api.get_credential(&token, &target).await }
     })
     .await?;
 
@@ -294,10 +292,10 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let secret = prompt::prompt_password("New secret (blank to keep): ")?;
 
     let mut req = UpdateCredentialRequest {
-        name: if name_input.trim().is_empty() {
+        name: if name_input.is_empty() {
             None
         } else {
-            Some(Some(name_input.trim().to_string()))
+            Some(Some(name_input))
         },
         username: prompt_optional_update(username_input),
         url: prompt_optional_update(url_input),
@@ -325,10 +323,9 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     Ok(())
 }
 
-pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
-    let id = prompt::resolve_line(id, "Credential title/id: ")?;
-    let id = id.trim().to_string();
-    if id.is_empty() {
+pub async fn delete(paths: &config::Paths, target: Option<String>) -> CliResult<()> {
+    let target = prompt::resolve_line(target, "Credential title/id: ")?;
+    if target.is_empty() {
         return Err(CliError::Message(
             "credential title/id cannot be empty".into(),
         ));
@@ -336,27 +333,27 @@ pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> 
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
 
-    let confirm = prompt::prompt_line(&format!("Delete credential {id}? [Y/n]: "))?;
+    let confirm = prompt::prompt_line(&format!("Delete credential {target}? [Y/n]: "))?;
     if matches!(confirm.to_lowercase().as_str(), "n" | "no") {
         println!("cancelled");
         return Ok(());
     }
 
-    let id_owned = id.clone();
     with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
-        let id_owned = id_owned.clone();
+        let id_owned = target.clone();
         async move { api.delete_credential(&token, &id_owned).await }
     })
     .await?;
 
-    println!("deleted {id}");
+    println!("deleted {target}");
     Ok(())
 }
 
 pub fn server(paths: &config::Paths, url: Option<String>) -> CliResult<String> {
-    let url = prompt::resolve_line(url, "Server URL: ")?;
-    let url = url.trim().trim_end_matches('/').to_string();
+    let url = prompt::resolve_line(url, "Server URL: ")?
+        .trim_end_matches('/')
+        .to_string();
     if url.is_empty() {
         return Err(CliError::Message("server URL cannot be empty".into()));
     }

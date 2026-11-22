@@ -100,7 +100,9 @@ async fn prelogin(
 
     let kdf_salt = match user {
         Some(u) => u.kdf_salt,
-        None => fake_kdf_salt(&state.config.jwt_secret, &input.email_normalized),
+        None => {
+            server::deterministic_fake_kdf_salt(&state.config.jwt_secret, &input.email_normalized)
+        }
     };
 
     Ok(Json(PreloginResponse {
@@ -177,14 +179,12 @@ async fn refresh(
     .ok_or(AppError::Unauthorized)?;
     let _found = rotated.old;
 
-    Ok(Json(AuthTokensResponse {
+    Ok(Json(token_response(
+        &state,
         access_token,
-        refresh_token: new_refresh_token,
-        token_type: "Bearer".to_string(),
-        access_expires_in_secs: state.config.access_token_ttl.as_secs(),
-        refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
-        kdf_salt: core::base64::encode(&user.kdf_salt),
-    }))
+        new_refresh_token,
+        &user.kdf_salt,
+    )))
 }
 
 async fn logout(
@@ -195,10 +195,6 @@ async fn logout(
     let token_hash = core::hash::sha256(input.refresh_token.as_bytes());
     refresh_tokens::delete_by_hash(&state.db, &token_hash).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-fn fake_kdf_salt(secret: &str, email_normalized: &str) -> Vec<u8> {
-    server::deterministic_fake_kdf_salt(secret, email_normalized)
 }
 
 fn minter_ext(m: Option<Extension<AccessTokenMinterExt>>) -> AccessTokenMinterExt {
@@ -217,6 +213,22 @@ fn mint_access_token(
         session_id,
         state.config.access_token_ttl.as_secs() as u64,
     )
+}
+
+fn token_response(
+    state: &AppState,
+    access_token: String,
+    refresh_token: String,
+    kdf_salt: &[u8],
+) -> AuthTokensResponse {
+    AuthTokensResponse {
+        access_token,
+        refresh_token,
+        token_type: "Bearer".to_string(),
+        access_expires_in_secs: state.config.access_token_ttl.as_secs(),
+        refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
+        kdf_salt: core::base64::encode(kdf_salt),
+    }
 }
 
 async fn issue_tokens(
@@ -248,14 +260,12 @@ async fn issue_tokens(
     )
     .await?;
 
-    Ok(Json(AuthTokensResponse {
+    Ok(Json(token_response(
+        state,
         access_token,
         refresh_token,
-        token_type: "Bearer".to_string(),
-        access_expires_in_secs: state.config.access_token_ttl.as_secs(),
-        refresh_expires_in_secs: state.config.refresh_token_ttl.as_secs(),
-        kdf_salt: core::base64::encode(kdf_salt),
-    }))
+        kdf_salt,
+    )))
 }
 
 async fn enforce_login_rate_limit(
