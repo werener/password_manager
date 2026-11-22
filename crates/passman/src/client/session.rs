@@ -14,6 +14,10 @@ pub struct Session {
     pub access_expires_in_secs: u64,
     pub refresh_expires_in_secs: u64,
     pub kdf_salt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_check_ciphertext: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_check_nonce: Option<String>,
 }
 
 impl Session {

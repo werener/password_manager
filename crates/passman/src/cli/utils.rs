@@ -121,14 +121,70 @@ where
     }
 }
 
-pub(super) fn derive_vault_key_for_session(
-    sess: &Session,
+const VAULT_CHECK_PLAINTEXT: &str = "passman-vault-check-v1";
+
+pub(super) fn create_vault_check(vault_key: &[u8; 32], email: &str) -> CliResult<(String, String)> {
+    crypto::encrypt_secret(vault_key, email, VAULT_CHECK_PLAINTEXT)
+        .map_err(|_| CliError::Message("failed to create vault check".into()))
+}
+
+fn verify_vault_check(sess: &Session, vault_key: &[u8; 32]) -> CliResult<()> {
+    let (Some(ciphertext), Some(nonce)) = (&sess.vault_check_ciphertext, &sess.vault_check_nonce)
+    else {
+        return Err(CliError::Message(
+            "session missing vault check; run `passman login`".into(),
+        ));
+    };
+    crypto::decrypt_secret(vault_key, &sess.email, ciphertext, nonce)
+        .map_err(|_| CliError::Message("invalid master password".into()))?;
+    Ok(())
+}
+
+pub(super) async fn derive_and_verify_vault_key(
+    api: &ApiClient,
+    paths: &config::Paths,
+    sess: &mut Session,
     password: &str,
 ) -> CliResult<zeroize::Zeroizing<[u8; 32]>> {
     let salt = core::base64::decode(&sess.kdf_salt)
         .map_err(|_| CliError::Message("kdf_salt must be valid base64".to_string()))?;
     let master = crypto::derive_master_key(password, &salt)?;
     let vault = crypto::derive_vault_key(&master)?;
+
+    if sess.vault_check_ciphertext.is_some() && sess.vault_check_nonce.is_some() {
+        verify_vault_check(sess, &vault)?;
+        return Ok(vault);
+    }
+
+    // Backward-compatible upgrade for sessions created before vault check existed.
+    let verifier = crypto::derive_auth_verifier(&master)?;
+    let resp = api
+        .login(&password_manager_dto::auth::LoginRequest {
+            email: sess.email.clone(),
+            auth_verifier: core::base64::encode(&verifier),
+        })
+        .await
+        .map_err(|e| match e {
+            crate::client::error::ClientError::Unauthorized(_) => {
+                CliError::Message("invalid master password".into())
+            }
+            other => CliError::Client(other),
+        })?;
+    if resp.kdf_salt != sess.kdf_salt {
+        return Err(CliError::Message(
+            "login protocol error: kdf_salt mismatch; run `passman login`".into(),
+        ));
+    }
+
+    let (vault_check_ciphertext, vault_check_nonce) = create_vault_check(&vault, &sess.email)?;
+    sess.access_token = resp.access_token;
+    sess.refresh_token = resp.refresh_token;
+    sess.access_expires_in_secs = resp.access_expires_in_secs;
+    sess.refresh_expires_in_secs = resp.refresh_expires_in_secs;
+    sess.kdf_salt = resp.kdf_salt;
+    sess.vault_check_ciphertext = Some(vault_check_ciphertext);
+    sess.vault_check_nonce = Some(vault_check_nonce);
+    sess.save(&paths.session)?;
     Ok(vault)
 }
 
@@ -204,6 +260,8 @@ mod tests {
             access_expires_in_secs: 900,
             refresh_expires_in_secs: 604800,
             kdf_salt: "salt-a".into(),
+            vault_check_ciphertext: None,
+            vault_check_nonce: None,
         }
     }
 

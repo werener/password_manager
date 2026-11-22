@@ -10,7 +10,7 @@ use crate::cli::{
     error::{CliError, CliResult},
     prompt,
     utils::{
-        derive_vault_key_for_session, edited_optional, get_server, load_session, prompt_prefilled,
+        derive_and_verify_vault_key, edited_optional, get_server, load_session, prompt_prefilled,
         resolve_email, resolve_master_for_register, resolve_optional_field, sanitize_terminal,
         with_auth_retry,
     },
@@ -68,6 +68,13 @@ pub async fn login(paths: &config::Paths, email: Option<String>) -> CliResult<()
         ));
     }
 
+    let salt = core::base64::decode(&resp.kdf_salt)
+        .map_err(|_| CliError::Message("kdf_salt must be valid base64".to_string()))?;
+    let master = crypto::derive_master_key(&password, &salt)?;
+    let vault = crypto::derive_vault_key(&master)?;
+    let (vault_check_ciphertext, vault_check_nonce) =
+        crate::cli::utils::create_vault_check(&vault, &email)?;
+
     let sess = Session {
         server_url: server,
         email,
@@ -76,6 +83,8 @@ pub async fn login(paths: &config::Paths, email: Option<String>) -> CliResult<()
         access_expires_in_secs: resp.access_expires_in_secs,
         refresh_expires_in_secs: resp.refresh_expires_in_secs,
         kdf_salt: resp.kdf_salt,
+        vault_check_ciphertext: Some(vault_check_ciphertext),
+        vault_check_nonce: Some(vault_check_nonce),
     };
     sess.save(&paths.session)?;
     println!("logged in as {}", sess.email);
@@ -113,7 +122,7 @@ pub async fn add(
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let password = prompt::prompt_password("Master password: ")?;
-    let vault = derive_vault_key_for_session(&sess, &password)?;
+    let vault = derive_and_verify_vault_key(&api, paths, &mut sess, &password).await?;
 
     let username = resolve_optional_field(username, "Username: ")?;
     let secret = prompt::resolve_password(secret, "Credential (password): ")?;
@@ -240,7 +249,7 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let password = prompt::prompt_password("Master password: ")?;
-    let vault = derive_vault_key_for_session(&sess, &password)?;
+    let vault = derive_and_verify_vault_key(&api, paths, &mut sess, &password).await?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
@@ -284,7 +293,7 @@ pub async fn edit(paths: &config::Paths, target: Option<String>) -> CliResult<()
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let password = prompt::prompt_password("Master password: ")?;
-    let vault = derive_vault_key_for_session(&sess, &password)?;
+    let vault = derive_and_verify_vault_key(&api, paths, &mut sess, &password).await?;
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
@@ -341,6 +350,8 @@ pub async fn delete(paths: &config::Paths, target: Option<String>) -> CliResult<
     }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
+    let password = prompt::prompt_password("Master password: ")?;
+    let _vault = derive_and_verify_vault_key(&api, paths, &mut sess, &password).await?;
 
     let confirm = prompt::prompt_line(&format!("Delete credential {target}? [Y/n]: "))?;
     if matches!(confirm.to_lowercase().as_str(), "n" | "no") {
@@ -404,6 +415,8 @@ mod server_tests {
             access_expires_in_secs: 900,
             refresh_expires_in_secs: 604800,
             kdf_salt: "salt-a".into(),
+            vault_check_ciphertext: None,
+            vault_check_nonce: None,
         }
     }
 
