@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::error::{ClientError, ClientResult};
+use crate::client::error::{ClientError, ClientResult};
 
 pub struct FileLock {
     _lock: Box<fd_lock::RwLock<fs::File>>,

@@ -28,9 +28,6 @@ pub enum ClientError {
     #[error("unauthorized: {0}")]
     Unauthorized(String),
 
-    #[error("crypto error: {0}")]
-    Crypto(String),
-
     #[error("not found: {0}")]
     NotFound(String),
 }

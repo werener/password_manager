@@ -7,7 +7,7 @@ pub enum CliError {
     Message(String),
 
     #[error(transparent)]
-    Client(#[from] password_manager_client::error::ClientError),
+    Client(#[from] crate::client::error::ClientError),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

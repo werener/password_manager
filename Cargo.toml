@@ -3,7 +3,6 @@ members = [
     "crates/backend",
     "crates/dto",
     "crates/crypto",
-    "crates/client",
     "crates/passman",
     "crates/migration",
 ]

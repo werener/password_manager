@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal, Write};
 
-use crate::error::CliError;
+use crate::cli::error::CliError;
 
 pub fn prompt_line(label: &str) -> Result<String, CliError> {
     if !io::stdin().is_terminal() {

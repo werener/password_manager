@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{ClientError, ClientResult};
+use crate::client::error::{ClientError, ClientResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
@@ -18,7 +18,7 @@ pub struct Session {
 
 impl Session {
     pub fn load(path: &Path) -> ClientResult<Option<Self>> {
-        let Some(raw) = crate::storage::read_to_string(path)? else {
+        let Some(raw) = crate::client::storage::read_to_string(path)? else {
             return Ok(None);
         };
         let session = serde_json::from_str(&raw)
@@ -29,7 +29,7 @@ impl Session {
     pub fn save(&self, path: &Path) -> ClientResult<()> {
         let raw = serde_json::to_string_pretty(self)
             .map_err(|e| ClientError::Serde(format!("failed to serialize session: {e}")))?;
-        crate::storage::write_atomic(path, raw.as_bytes(), 0o600)
+        crate::client::storage::write_atomic(path, raw.as_bytes(), 0o600)
     }
 
     pub fn clear(path: &Path) -> ClientResult<()> {

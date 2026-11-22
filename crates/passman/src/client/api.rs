@@ -13,7 +13,7 @@ use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::{ClientError, ClientResult};
+use crate::client::error::{ClientError, ClientResult};
 
 #[derive(Debug, Clone)]
 pub struct ApiClient {

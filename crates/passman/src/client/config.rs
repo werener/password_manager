@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{ClientError, ClientResult};
+use crate::client::error::{ClientError, ClientResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -24,13 +24,12 @@ impl Config {
     pub fn save(&self, path: &Path) -> ClientResult<()> {
         let raw = toml::to_string_pretty(self)
             .map_err(|e| ClientError::Serde(format!("failed to serialize config: {e}")))?;
-        crate::storage::write_atomic(path, raw.as_bytes(), 0o600)
+        crate::client::storage::write_atomic(path, raw.as_bytes(), 0o600)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Paths {
-    pub dir: PathBuf,
     pub config: PathBuf,
     pub session: PathBuf,
 }
@@ -43,7 +42,6 @@ impl Paths {
         Ok(Self {
             config: dir.join("config.toml"),
             session: dir.join("session.json"),
-            dir,
         })
     }
 }
