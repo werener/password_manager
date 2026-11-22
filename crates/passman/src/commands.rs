@@ -236,14 +236,14 @@ pub async fn add(
     let password = prompt::prompt_password("Master password: ")?;
     let vault = derive_vault_key_for_session(&sess, &password)?;
 
-    let name = prompt::resolve_line(name, "Name: ")?;
+    let username = resolve_optional_field(username, "Username: ")?;
+    let secret = prompt::resolve_password(secret, "Credential (password): ")?;
+    let name = prompt::resolve_line(name, "Credential title: ")?;
     if name.trim().is_empty() {
         return Err(CliError::Message("name cannot be empty".into()));
     }
-    let username = resolve_optional_field(username, "Username (optional): ")?;
-    let url = resolve_optional_field(url, "URL (optional): ")?;
-    let notes = resolve_optional_field(notes, "Notes (optional): ")?;
-    let secret = prompt::resolve_password(secret, "Credential secret: ")?;
+    let url = resolve_optional_field(url, "URL: ")?;
+    let notes = resolve_optional_field(notes, "Notes: ")?;
 
     let (ciphertext, nonce) = crypto::encrypt_secret(&vault, &sess.email, &secret)?;
     let req = CreateCredentialRequest {

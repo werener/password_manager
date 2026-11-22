@@ -31,13 +31,17 @@ enum Command {
     Config,
     /// Register a new account
     Register {
-        #[arg(long)]
+        /// Email address (same as --email)
         email: Option<String>,
+        #[arg(long = "email", conflicts_with = "email")]
+        email_opt: Option<String>,
     },
     /// Login to an account
     Login {
-        #[arg(long)]
+        /// Email address (same as --email)
         email: Option<String>,
+        #[arg(long = "email", conflicts_with = "email")]
+        email_opt: Option<String>,
     },
     /// Logout from current account
     Logout,
@@ -105,8 +109,8 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 }
             }
         }
-        Command::Register { email } => commands::register(&paths, email).await?,
-        Command::Login { email } => commands::login(&paths, email).await?,
+        Command::Register { email, email_opt } => commands::register(&paths, email.or(email_opt)).await?,
+        Command::Login { email, email_opt } => commands::login(&paths, email.or(email_opt)).await?,
         Command::Logout => commands::logout(&paths).await?,
         Command::Add {
             name,
