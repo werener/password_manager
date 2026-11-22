@@ -18,7 +18,7 @@ impl Config {
             path: path.to_path_buf(),
             source,
         })?;
-        toml::from_str(&raw).map_err(|e| ClientError::Config(format!("invalid config: {e}")))
+        toml::from_str(&raw).map_err(|_| ClientError::Config("corrupted config file".to_string()))
     }
 
     pub fn save(&self, path: &Path) -> ClientResult<()> {
@@ -45,5 +45,21 @@ impl Paths {
             session: dir.join("session.json"),
             dir,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn corrupted_config_returns_friendly_error() {
+        let dir = std::env::temp_dir().join(format!("passman-cfg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "server_url = [broken").unwrap();
+        let err = Config::load(&path).unwrap_err().to_string();
+        assert!(err.contains("corrupted config file"));
+        assert!(!err.to_lowercase().contains("toml"));
     }
 }
