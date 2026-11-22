@@ -238,9 +238,9 @@ pub async fn add(
 
     let username = resolve_optional_field(username, "Username: ")?;
     let secret = prompt::resolve_password(secret, "Credential (password): ")?;
-    let name = prompt::resolve_line(name, "Credential title: ")?;
+    let name = prompt::resolve_line(name, "Title: ")?;
     if name.trim().is_empty() {
-        return Err(CliError::Message("name cannot be empty".into()));
+        return Err(CliError::Message("title cannot be empty".into()));
     }
     let url = resolve_optional_field(url, "URL: ")?;
     let notes = resolve_optional_field(notes, "Notes: ")?;
@@ -267,7 +267,7 @@ pub async fn add(
     Ok(())
 }
 
-pub async fn list(paths: &config::Paths) -> CliResult<()> {
+pub async fn list(paths: &config::Paths, show_ids: bool) -> CliResult<()> {
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let rows = with_auth_retry(&api, paths, &mut sess, |token| {
@@ -280,21 +280,74 @@ pub async fn list(paths: &config::Paths) -> CliResult<()> {
         println!("no credentials");
         return Ok(());
     }
-    for r in rows {
-        println!(
-            "{}\t{}\t{}\t{}",
-            r.id,
-            r.name,
-            r.username.as_deref().unwrap_or("-"),
-            r.url.as_deref().unwrap_or("-")
-        );
+    let mut table: Vec<Vec<String>> = Vec::new();
+    if show_ids {
+        table.push(vec![
+            "ID".into(),
+            "Title".into(),
+            "Username".into(),
+            "URL".into(),
+            "Notes".into(),
+        ]);
+    } else {
+        table.push(vec![
+            "Title".into(),
+            "Username".into(),
+            "URL".into(),
+            "Notes".into(),
+        ]);
+    }
+    for r in &rows {
+        let row = if show_ids {
+            vec![
+                r.id.to_string(),
+                sanitize_terminal(&r.name),
+                sanitize_terminal(r.username.as_deref().unwrap_or("-")),
+                sanitize_terminal(r.url.as_deref().unwrap_or("-")),
+                sanitize_terminal(r.notes.as_deref().unwrap_or("-")),
+            ]
+        } else {
+            vec![
+                sanitize_terminal(&r.name),
+                sanitize_terminal(r.username.as_deref().unwrap_or("-")),
+                sanitize_terminal(r.url.as_deref().unwrap_or("-")),
+                sanitize_terminal(r.notes.as_deref().unwrap_or("-")),
+            ]
+        };
+        table.push(row);
+    }
+    let cols = table[0].len();
+    let mut widths = vec![0usize; cols];
+    for row in &table {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.chars().count());
+        }
+    }
+    for row in &table {
+        let mut line = String::new();
+        for (i, cell) in row.iter().enumerate() {
+            if i > 0 {
+                line.push_str("  ");
+            }
+            line.push_str(cell);
+            if i + 1 < cols {
+                let pad = widths[i].saturating_sub(cell.chars().count());
+                for _ in 0..pad {
+                    line.push(' ');
+                }
+            }
+        }
+        println!("{line}");
     }
     Ok(())
 }
 
 pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
-    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
-    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
+    let id = prompt::resolve_line(id, "Credential title/id: ")?;
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err(CliError::Message("credential title/id cannot be empty".into()));
+    }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let password = prompt::prompt_password("Master password: ")?;
@@ -302,7 +355,8 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
-        async move { api.get_credential(&token, id).await }
+        let id = id.clone();
+        async move { api.get_credential(&token, &id).await }
     })
     .await?;
 
@@ -312,18 +366,21 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         &row.password_ciphertext,
         &row.password_nonce,
     )?;
-    println!("id: {}", row.id);
-    println!("name: {}", sanitize_terminal(&row.name));
-    println!("username: {}", sanitize_terminal(row.username.as_deref().unwrap_or("")));
-    println!("url: {}", sanitize_terminal(row.url.as_deref().unwrap_or("")));
-    println!("notes: {}", sanitize_terminal(row.notes.as_deref().unwrap_or("")));
-    println!("secret: {}", sanitize_terminal(&secret));
+    println!("ID: {}", row.id);
+    println!("Username: {}", sanitize_terminal(row.username.as_deref().unwrap_or("")));
+    println!("Credential: {}", sanitize_terminal(&secret));
+    println!("Title: {}", sanitize_terminal(&row.name));
+    println!("URL: {}", sanitize_terminal(row.url.as_deref().unwrap_or("")));
+    println!("Notes: {}", sanitize_terminal(row.notes.as_deref().unwrap_or("")));
     Ok(())
 }
 
 pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
-    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
-    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
+    let id = prompt::resolve_line(id, "Credential title/id: ")?;
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err(CliError::Message("credential title/id cannot be empty".into()));
+    }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
     let password = prompt::prompt_password("Master password: ")?;
@@ -331,7 +388,8 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
 
     let row = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
-        async move { api.get_credential(&token, id).await }
+        let id = id.clone();
+        async move { api.get_credential(&token, &id).await }
     })
     .await?;
 
@@ -363,10 +421,12 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         req.password_nonce = Some(Some(nonce));
     }
 
+    let target_id = row.id.to_string();
     let updated = with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
         let req = req.clone();
-        async move { api.update_credential(&token, id, &req).await }
+        let target_id = target_id.clone();
+        async move { api.update_credential(&token, &target_id, &req).await }
     })
     .await?;
 
@@ -375,8 +435,11 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
 }
 
 pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
-    let id_raw = prompt::resolve_line(id, "Credential id: ")?;
-    let id = Uuid::parse_str(id_raw.trim()).map_err(|_| CliError::InvalidId(id_raw))?;
+    let id = prompt::resolve_line(id, "Credential title/id: ")?;
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err(CliError::Message("credential title/id cannot be empty".into()));
+    }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
 
@@ -386,9 +449,11 @@ pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> 
         return Ok(());
     }
 
+    let id_owned = id.clone();
     with_auth_retry(&api, paths, &mut sess, |token| {
         let api = api.clone();
-        async move { api.delete_credential(&token, id).await }
+        let id_owned = id_owned.clone();
+        async move { api.delete_credential(&token, &id_owned).await }
     })
     .await?;
 

@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use crate::error::{ClientError, ClientResult};
 
 pub struct FileLock {
-    _lock: fd_lock::RwLock<fs::File>,
+    _lock: Box<fd_lock::RwLock<fs::File>>,
     _guard: fd_lock::RwLockWriteGuard<'static, fs::File>,
 }
 
@@ -38,9 +38,9 @@ pub fn lock_exclusive(path: &Path) -> ClientResult<FileLock> {
         path: lock_path,
         source: std::io::Error::other(e.to_string()),
     })?;
-    // SAFETY: guard borrows lock in this box; both are stored in FileLock and dropped in field order.
+    // SAFETY: guard borrows data owned by `lock`; `lock` is kept boxed in FileLock
+    // and dropped after `_guard` due to field order.
     let guard: fd_lock::RwLockWriteGuard<'static, fs::File> = unsafe { std::mem::transmute(guard) };
-    let lock = *lock;
     Ok(FileLock {
         _lock: lock,
         _guard: guard,

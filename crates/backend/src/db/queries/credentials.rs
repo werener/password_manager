@@ -62,6 +62,18 @@ pub async fn find_owned(
         .await?)
 }
 
+pub async fn find_owned_by_name(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    name: &str,
+) -> AppResult<Option<credential::Model>> {
+    Ok(credential::Entity::find()
+        .filter(credential::Column::UserId.eq(user_id))
+        .filter(credential::Column::Name.eq(name))
+        .one(db)
+        .await?)
+}
+
 pub async fn update(
     db: &DatabaseConnection,
     active: credential::ActiveModel,

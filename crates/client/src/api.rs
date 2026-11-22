@@ -181,7 +181,7 @@ impl ApiClient {
     pub async fn get_credential(
         &self,
         access_token: &str,
-        id: uuid::Uuid,
+        id: &str,
     ) -> ClientResult<CredentialResponse> {
         self.send_json(
             Method::GET,
@@ -196,7 +196,7 @@ impl ApiClient {
     pub async fn update_credential(
         &self,
         access_token: &str,
-        id: uuid::Uuid,
+        id: &str,
         req: &UpdateCredentialRequest,
     ) -> ClientResult<CredentialResponse> {
         self.send_json(
@@ -209,7 +209,7 @@ impl ApiClient {
         .await
     }
 
-    pub async fn delete_credential(&self, access_token: &str, id: uuid::Uuid) -> ClientResult<()> {
+    pub async fn delete_credential(&self, access_token: &str, id: &str) -> ClientResult<()> {
         self.send_empty(
             Method::DELETE,
             &format!("/credentials/{id}"),

@@ -59,7 +59,11 @@ enum Command {
         secret: Option<String>,
     },
     /// List credentials
-    List,
+    List {
+        /// Show credential IDs
+        #[arg(long = "ids")]
+        show_ids: bool,
+    },
     /// Get a credential by id
     Get {
         id: Option<String>,
@@ -119,7 +123,7 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
             notes,
             secret,
         } => commands::add(&paths, name, username, url, notes, secret).await?,
-        Command::List => commands::list(&paths).await?,
+        Command::List { show_ids } => commands::list(&paths, show_ids).await?,
         Command::Get { id } => commands::get(&paths, id).await?,
         Command::Edit { id } => commands::edit(&paths, id).await?,
         Command::Delete { id } => commands::delete(&paths, id).await?,
