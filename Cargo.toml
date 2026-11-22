@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "crates/backend",
-    "crates/api-types",
+    "crates/dto",
+    "crates/crypto",
     "crates/client",
     "crates/passman",
     "crates/migration",

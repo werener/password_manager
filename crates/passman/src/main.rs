@@ -65,13 +65,9 @@ enum Command {
         show_ids: bool,
     },
     /// Get a credential by id
-    Get {
-        id: Option<String>,
-    },
+    Get { id: Option<String> },
     /// Edit a credential by id
-    Edit {
-        id: Option<String>,
-    },
+    Edit { id: Option<String> },
     /// Delete a credential by id
     Delete { id: Option<String> },
 }
@@ -113,7 +109,9 @@ async fn run(cli: Cli) -> Result<(), error::CliError> {
                 }
             }
         }
-        Command::Register { email, email_opt } => commands::register(&paths, email.or(email_opt)).await?,
+        Command::Register { email, email_opt } => {
+            commands::register(&paths, email.or(email_opt)).await?
+        }
         Command::Login { email, email_opt } => commands::login(&paths, email.or(email_opt)).await?,
         Command::Logout => commands::logout(&paths).await?,
         Command::Add {

@@ -8,12 +8,13 @@ use chrono::Utc;
 use sea_orm::Set;
 use uuid::Uuid;
 
+use password_manager_dto::credentials::{
+        CreateCredentialRequest, CredentialMetadataResponse, CredentialResponse,
+        UpdateCredentialRequest,
+    };
+
 use crate::{
     app::{
-        dto::credentials::{
-            CreateCredentialRequest, CredentialMetadataResponse, CredentialResponse,
-            UpdateCredentialRequest,
-        },
         extractors::{AuthUser, IdempotencyKey},
         state::AppState,
         validation::credentials::{CreateCredentialInput, UpdateCredentialInput},

@@ -43,7 +43,10 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/auth", auth::router())
         .nest("/credentials", credentials::router())
         .layer(middleware::from_fn(sanitize_framework_errors));
-    Router::new().route("/health", get(health)).merge(api).with_state(state)
+    Router::new()
+        .route("/health", get(health))
+        .merge(api)
+        .with_state(state)
 }
 
 use axum::{body::Body, http::Response, middleware::Next};
@@ -53,14 +56,17 @@ async fn sanitize_framework_errors(req: axum::http::Request<Body>, next: Next) -
     let status = resp.status();
     if status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::BAD_REQUEST {
         let (parts, body) = resp.into_parts();
-        let bytes = axum::body::to_bytes(body, 64 * 1024).await.unwrap_or_default();
+        let bytes = axum::body::to_bytes(body, 64 * 1024)
+            .await
+            .unwrap_or_default();
         let text = String::from_utf8_lossy(&bytes);
         let looks_internal = text.contains("Failed to deserialize")
             || text.contains("missing field")
             || text.contains("UUID parsing failed")
             || text.contains("Invalid URL");
         if looks_internal {
-            let body = serde_json::json!({"code":"bad_request","message":"invalid request"}).to_string();
+            let body =
+                serde_json::json!({"code":"bad_request","message":"invalid request"}).to_string();
             return Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(axum::http::header::CONTENT_TYPE, "application/json")

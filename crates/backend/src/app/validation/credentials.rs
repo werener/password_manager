@@ -1,8 +1,7 @@
+use password_manager_dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest};
+
 use crate::{
-    app::{
-        dto::credentials::{CreateCredentialRequest, UpdateCredentialRequest},
-        extractors::IdempotencyKey,
-    },
+    app::extractors::IdempotencyKey,
     crypto::decode_base64,
     error::{AppError, AppResult},
 };
@@ -81,12 +80,18 @@ impl TryFrom<UpdateCredentialRequest> for UpdateCredentialInput {
         if let Some(notes) = &payload.notes {
             validate_opt_text("notes", notes, 512)?;
         }
-        let secret = match (payload.password_ciphertext, payload.password_nonce) {
+        let secret = match (
+            payload.password_ciphertext.as_ref(),
+            payload.password_nonce.as_ref(),
+        ) {
             (Some(Some(ct)), Some(Some(nonce))) => {
-                let ciphertext = decode_base64("password_ciphertext", &ct)?;
-                let nonce = decode_base64("password_nonce", &nonce)?;
-                validate_secret(&ciphertext, &nonce)?;
-                Some(SecretBytes { ciphertext, nonce })
+                let ciphertext = decode_base64("password_ciphertext", ct)?;
+                let nonce_bytes = decode_base64("password_nonce", nonce)?;
+                validate_secret(&ciphertext, &nonce_bytes)?;
+                Some(SecretBytes {
+                    ciphertext,
+                    nonce: nonce_bytes,
+                })
             }
             (None, None) => None,
             (Some(None), _) | (_, Some(None)) => {

@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 migration = { path = "../migration" }
-password_manager_api_types = { path = "../api-types" }
+password_manager_dto = { path = "../dto" }
+password_manager_crypto = { path = "../crypto" }
 axum = "0.7"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }

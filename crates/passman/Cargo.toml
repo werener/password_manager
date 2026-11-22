@@ -8,7 +8,7 @@ name = "passman"
 path = "src/main.rs"
 
 [dependencies]
-password_manager_api_types = { path = "../api-types" }
+password_manager_dto = { path = "../dto" }
 password_manager_client = { path = "../client" }
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

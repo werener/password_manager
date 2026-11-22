@@ -1,4 +1,4 @@
-use password_manager_api_types::{
+use password_manager_dto::{
     auth::{
         AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
         RefreshRequest, RegisterRequest, RegisterResponse,

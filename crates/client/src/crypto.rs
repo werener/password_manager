@@ -1,5 +1,4 @@
 use argon2::{Algorithm, Argon2, Params, Version};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Payload},
@@ -18,7 +17,7 @@ const AUTH_INFO: &[u8] = b"passman.v1.auth-verifier";
 const VAULT_INFO: &[u8] = b"passman.v1.vault-key";
 
 pub fn normalize_email(email: &str) -> String {
-    email.trim().to_lowercase()
+    password_manager_crypto::client::normalize_email(email)
 }
 
 pub fn generate_kdf_salt() -> [u8; KDF_SALT_LEN] {
@@ -62,12 +61,11 @@ pub fn derive_vault_key(master_key: &[u8; KEY_LEN]) -> ClientResult<Zeroizing<[u
 }
 
 pub fn encode_b64(bytes: &[u8]) -> String {
-    BASE64.encode(bytes)
+    password_manager_crypto::client::encode_base64(bytes)
 }
 
 pub fn decode_b64(field: &str, value: &str) -> ClientResult<Vec<u8>> {
-    BASE64
-        .decode(value)
+    password_manager_crypto::client::decode_base64(value)
         .map_err(|_| ClientError::Crypto(format!("{field} must be valid base64")))
 }
 

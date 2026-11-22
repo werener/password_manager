@@ -770,10 +770,30 @@ async fn framework_rejections_are_mapped_to_app_errors() {
 
     // need token for credential path? invalid uuid path can be tested without auth? route is protected; bad auth may happen first. Use a bogus token to pass auth? easier: register/login to get token.
     let email = format!("rej-{}@example.com", Uuid::new_v4());
-    let _ = request(&mut app, json_req(Method::POST, "/auth/register", json!({"email": email, "auth_verifier": b64(&[1u8;32]), "kdf_salt": b64(&[2u8;32])}))).await;
-    let (_, login) = request(&mut app, json_req(Method::POST, "/auth/login", json!({"email": email, "auth_verifier": b64(&[1u8;32])}))).await;
+    let _ = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/register",
+            json!({"email": email, "auth_verifier": b64(&[1u8;32]), "kdf_salt": b64(&[2u8;32])}),
+        ),
+    )
+    .await;
+    let (_, login) = request(
+        &mut app,
+        json_req(
+            Method::POST,
+            "/auth/login",
+            json!({"email": email, "auth_verifier": b64(&[1u8;32])}),
+        ),
+    )
+    .await;
     let token = login["access_token"].as_str().unwrap();
-    let (status, body) = request(&mut app, auth_req(Method::GET, "/credentials/not-a-uuid", token)).await;
+    let (status, body) = request(
+        &mut app,
+        auth_req(Method::GET, "/credentials/not-a-uuid", token),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["code"], "bad_request");
     let msg = body["message"].as_str().unwrap_or_default();

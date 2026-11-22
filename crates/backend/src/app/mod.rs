@@ -1,4 +1,3 @@
-pub mod dto;
 pub mod extractors;
 pub mod routers;
 pub mod state;

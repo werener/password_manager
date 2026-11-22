@@ -1651,8 +1651,8 @@ name = "passman"
 version = "0.1.0"
 dependencies = [
  "clap",
- "password_manager_api_types",
  "password_manager_client",
+ "password_manager_dto",
  "reqwest",
  "rpassword",
  "serde_json",
@@ -1674,15 +1674,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "password_manager_api_types"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "password_manager_backend"
 version = "0.1.0"
 dependencies = [
@@ -1694,7 +1685,8 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "migration",
- "password_manager_api_types",
+ "password_manager_crypto",
+ "password_manager_dto",
  "rand 0.8.8",
  "redis",
  "sea-orm",
@@ -1720,7 +1712,8 @@ dependencies = [
  "directories",
  "fd-lock",
  "hkdf",
- "password_manager_api_types",
+ "password_manager_crypto",
+ "password_manager_dto",
  "rand 0.8.8",
  "reqwest",
  "serde",
@@ -1730,6 +1723,22 @@ dependencies = [
  "toml",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "password_manager_crypto"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+]
+
+[[package]]
+name = "password_manager_dto"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

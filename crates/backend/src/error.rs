@@ -1,9 +1,9 @@
-use crate::app::dto::ApiErrorBody;
 use axum::{
     Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use password_manager_dto::error::ApiErrorBody;
 
 /// Application error type mapped to HTTP responses.
 #[derive(Debug, thiserror::Error)]

@@ -1,7 +1,8 @@
+use password_manager_dto::auth::{
+    LoginRequest, LogoutRequest, PreloginRequest, RefreshRequest, RegisterRequest,
+};
+
 use crate::{
-    app::dto::auth::{
-        LoginRequest, LogoutRequest, PreloginRequest, RefreshRequest, RegisterRequest,
-    },
     crypto::{decode_base64, normalize_email, validate_email},
     error::AppError,
 };

@@ -1,8 +1,8 @@
-use password_manager_api_types::{
+use password_manager_client::{api::ApiClient, config, crypto, session::Session};
+use password_manager_dto::{
     auth::{LoginRequest, LogoutRequest, PreloginRequest, RegisterRequest},
     credentials::{CreateCredentialRequest, UpdateCredentialRequest},
 };
-use password_manager_client::{api::ApiClient, config, crypto, session::Session};
 use uuid::Uuid;
 
 use crate::{
@@ -39,7 +39,7 @@ fn load_session(paths: &config::Paths) -> CliResult<Session> {
 
 fn apply_refresh_response(
     sess: &mut Session,
-    resp: password_manager_api_types::auth::AuthTokensResponse,
+    resp: password_manager_dto::auth::AuthTokensResponse,
     session_path: &std::path::Path,
 ) -> CliResult<()> {
     if resp.kdf_salt != sess.kdf_salt {
@@ -67,7 +67,7 @@ async fn refresh_session_locked(
         return Ok(true);
     }
     let resp = api
-        .refresh(&password_manager_api_types::auth::RefreshRequest {
+        .refresh(&password_manager_dto::auth::RefreshRequest {
             refresh_token: sess.refresh_token.clone(),
         })
         .await
@@ -125,10 +125,7 @@ where
     }
 }
 
-pub async fn register(
-    paths: &config::Paths,
-    email: Option<String>,
-) -> CliResult<()> {
+pub async fn register(paths: &config::Paths, email: Option<String>) -> CliResult<()> {
     let cfg = config::Config::load(&paths.config)?;
     let server = get_server(&cfg)?;
     let email = resolve_email(email)?;
@@ -346,7 +343,9 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id = prompt::resolve_line(id, "Credential title/id: ")?;
     let id = id.trim().to_string();
     if id.is_empty() {
-        return Err(CliError::Message("credential title/id cannot be empty".into()));
+        return Err(CliError::Message(
+            "credential title/id cannot be empty".into(),
+        ));
     }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
@@ -367,11 +366,20 @@ pub async fn get(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
         &row.password_nonce,
     )?;
     println!("ID: {}", row.id);
-    println!("Username: {}", sanitize_terminal(row.username.as_deref().unwrap_or("")));
+    println!(
+        "Username: {}",
+        sanitize_terminal(row.username.as_deref().unwrap_or(""))
+    );
     println!("Credential: {}", sanitize_terminal(&secret));
     println!("Title: {}", sanitize_terminal(&row.name));
-    println!("URL: {}", sanitize_terminal(row.url.as_deref().unwrap_or("")));
-    println!("Notes: {}", sanitize_terminal(row.notes.as_deref().unwrap_or("")));
+    println!(
+        "URL: {}",
+        sanitize_terminal(row.url.as_deref().unwrap_or(""))
+    );
+    println!(
+        "Notes: {}",
+        sanitize_terminal(row.notes.as_deref().unwrap_or(""))
+    );
     Ok(())
 }
 
@@ -379,7 +387,9 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let id = prompt::resolve_line(id, "Credential title/id: ")?;
     let id = id.trim().to_string();
     if id.is_empty() {
-        return Err(CliError::Message("credential title/id cannot be empty".into()));
+        return Err(CliError::Message(
+            "credential title/id cannot be empty".into(),
+        ));
     }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
@@ -398,8 +408,7 @@ pub async fn edit(paths: &config::Paths, id: Option<String>) -> CliResult<()> {
     let username_input =
         prompt_line_with_current("Username", row.username.as_deref().unwrap_or(""))?;
     let url_input = prompt_line_with_current("URL", row.url.as_deref().unwrap_or(""))?;
-    let notes_input =
-        prompt_line_with_current("Notes", row.notes.as_deref().unwrap_or(""))?;
+    let notes_input = prompt_line_with_current("Notes", row.notes.as_deref().unwrap_or(""))?;
     let secret = prompt::prompt_password("New secret (blank to keep): ")?;
 
     let mut req = UpdateCredentialRequest {
@@ -438,13 +447,15 @@ pub async fn delete(paths: &config::Paths, id: Option<String>) -> CliResult<()> 
     let id = prompt::resolve_line(id, "Credential title/id: ")?;
     let id = id.trim().to_string();
     if id.is_empty() {
-        return Err(CliError::Message("credential title/id cannot be empty".into()));
+        return Err(CliError::Message(
+            "credential title/id cannot be empty".into(),
+        ));
     }
     let mut sess = load_session(paths)?;
     let api = ApiClient::new(sess.server_url.clone())?;
 
-    let confirm = prompt::prompt_line(&format!("Delete credential {id}? [y/N]: "))?;
-    if !matches!(confirm.to_lowercase().as_str(), "y" | "yes") {
+    let confirm = prompt::prompt_line(&format!("Delete credential {id}? [Y/n]: "))?;
+    if matches!(confirm.to_lowercase().as_str(), "n" | "no") {
         println!("cancelled");
         return Ok(());
     }
@@ -491,7 +502,7 @@ fn prompt_optional_update(value: String) -> Option<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use password_manager_api_types::auth::AuthTokensResponse;
+    use password_manager_dto::auth::AuthTokensResponse;
     use std::fs;
 
     fn temp_session_path(name: &str) -> std::path::PathBuf {

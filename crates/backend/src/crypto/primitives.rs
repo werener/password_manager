@@ -2,7 +2,6 @@ use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{Duration as ChronoDuration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::{RngCore, rngs::OsRng};
@@ -22,7 +21,7 @@ pub struct AccessClaims {
 }
 
 pub fn normalize_email(email: &str) -> String {
-    email.trim().to_lowercase()
+    password_manager_crypto::server::normalize_email(email)
 }
 
 pub fn validate_email(email: &str) -> AppResult<()> {
@@ -37,13 +36,12 @@ pub fn validate_email(email: &str) -> AppResult<()> {
 }
 
 pub fn decode_base64(field: &'static str, value: &str) -> AppResult<Vec<u8>> {
-    BASE64
-        .decode(value)
+    password_manager_crypto::server::decode_base64(value)
         .map_err(|_| AppError::BadRequest(format!("{field} must be valid base64")))
 }
 
 pub fn encode_base64(value: &[u8]) -> String {
-    BASE64.encode(value)
+    password_manager_crypto::server::encode_base64(value)
 }
 
 pub fn hash_auth_verifier(auth_verifier: &[u8]) -> AppResult<String> {

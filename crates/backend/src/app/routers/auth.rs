@@ -13,12 +13,13 @@ use redis::AsyncCommands;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use password_manager_dto::auth::{
+        AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
+        RefreshRequest, RegisterRequest, RegisterResponse,
+    };
+
 use crate::{
     app::{
-        dto::auth::{
-            AuthTokensResponse, LoginRequest, LogoutRequest, PreloginRequest, PreloginResponse,
-            RefreshRequest, RegisterRequest, RegisterResponse,
-        },
         state::AppState,
         validation::auth::{LoginInput, LogoutInput, PreloginInput, RefreshInput, RegisterInput},
     },
@@ -159,7 +160,8 @@ async fn refresh(
         .await?
         .ok_or(AppError::Unauthorized)?;
 
-    let access_token = mint_access_token(&state, &minter_ext(minter), found.user_id, found.session_id)?;
+    let access_token =
+        mint_access_token(&state, &minter_ext(minter), found.user_id, found.session_id)?;
 
     let rotated = refresh_tokens::rotate_by_hash(
         &state.db,
