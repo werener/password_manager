@@ -29,7 +29,7 @@ impl ApiClient {
         }
         let http = reqwest::Client::builder()
             .build()
-            .map_err(|e| ClientError::Network(e.to_string()))?;
+            .map_err(|e| ClientError::network(&e))?;
         Ok(Self { base_url, http })
     }
 
@@ -55,10 +55,7 @@ impl ApiClient {
         if let Some(body) = body {
             req = req.json(&body);
         }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ClientError::Network(e.to_string()))?;
+        let resp = req.send().await.map_err(|e| ClientError::network(&e))?;
         self.parse_response(resp).await
     }
 
@@ -76,10 +73,7 @@ impl ApiClient {
         if let Some(body) = body {
             req = req.json(&body);
         }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ClientError::Network(e.to_string()))?;
+        let resp = req.send().await.map_err(|e| ClientError::network(&e))?;
         let status = resp.status();
         if status.is_success() {
             return Ok(());
@@ -93,9 +87,9 @@ impl ApiClient {
     ) -> ClientResult<T> {
         let status = resp.status();
         if status.is_success() {
-            resp.json::<T>()
-                .await
-                .map_err(|e| ClientError::Network(format!("invalid response json: {e}")))
+            resp.json::<T>().await.map_err(|e| {
+                ClientError::Network(format!("received invalid response from server: {e}"))
+            })
         } else {
             Err(self.parse_error(status, resp).await)
         }

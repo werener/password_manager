@@ -32,7 +32,16 @@ pub async fn register(paths: &config::Paths, email: Option<String>) -> CliResult
         auth_verifier: core::base64::encode(&verifier),
         kdf_salt: core::base64::encode(&salt),
     })
-    .await?;
+    .await
+    .map_err(|e| match e {
+        crate::client::error::ClientError::Api {
+            status: 409,
+            code,
+            message,
+            ..
+        } if code == "conflict" => CliError::Message(message),
+        other => CliError::Client(other),
+    })?;
 
     println!("registered {email}");
     Ok(())
@@ -60,7 +69,16 @@ pub async fn login(paths: &config::Paths, email: Option<String>) -> CliResult<()
             email: email.clone(),
             auth_verifier: core::base64::encode(&verifier),
         })
-        .await?;
+        .await
+        .map_err(|e| match e {
+            crate::client::error::ClientError::Unauthorized(_) => {
+                CliError::Message("invalid email or master password".into())
+            }
+            crate::client::error::ClientError::Api { status: 429, .. } => {
+                CliError::Message("too many login attempts; try again later".into())
+            }
+            other => CliError::Client(other),
+        })?;
 
     if resp.kdf_salt != pre.kdf_salt {
         return Err(CliError::Message(

@@ -15,21 +15,41 @@ pub enum ClientError {
     #[error("serialization error: {0}")]
     Serde(String),
 
-    #[error("network error: {0}")]
+    #[error("{0}")]
     Network(String),
 
-    #[error("api error ({status}, {code}): {message}")]
+    #[error("{message}")]
     Api {
         status: u16,
         code: String,
         message: String,
     },
 
-    #[error("unauthorized: {0}")]
+    #[error("{0}")]
     Unauthorized(String),
 
-    #[error("not found: {0}")]
+    #[error("{0}")]
     NotFound(String),
+}
+
+impl ClientError {
+    pub fn network(err: &reqwest::Error) -> Self {
+        let msg = if err.is_builder() {
+            "invalid server URL; check `passman server <url>`".to_string()
+        } else if err.is_timeout() {
+            "request timed out; check server availability and try again".to_string()
+        } else if err.is_connect() {
+            "could not connect to server; check server URL and that the server is running"
+                .to_string()
+        } else if err.is_request() {
+            "failed to send request; check network connection".to_string()
+        } else if err.is_decode() {
+            "received invalid response from server".to_string()
+        } else {
+            format!("network request failed: {err}")
+        };
+        Self::Network(msg)
+    }
 }
 
 pub type ClientResult<T> = Result<T, ClientError>;
